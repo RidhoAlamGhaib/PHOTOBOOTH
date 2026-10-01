@@ -1,0 +1,40 @@
+2026-10-02 00:19:43 [INFO] root: ============================================================
+2026-10-02 00:19:43 [INFO] root: Photobooth Ceria starting up
+2026-10-02 00:19:43 [INFO] root:   Python:    3.14.3
+2026-10-02 00:19:43 [INFO] root:   Platform:  Windows 10
+2026-10-02 00:19:43 [INFO] root:   Frozen:    False
+2026-10-02 00:19:43 [INFO] root:   BASE_DIR:  C:\Users\Junesystems\Documents\photobooth
+2026-10-02 00:19:43 [INFO] root:   Log file:  C:\Users\Junesystems\Documents\photobooth\logs\photobooth_20261002.log
+2026-10-02 00:19:43 [INFO] root: ============================================================
+2026-10-02 00:19:43 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
+2026-10-02 00:19:43 [INFO] root: [UI] screen 1920x1040 — applying UI scale 0.963
+2026-10-02 00:19:44 [INFO] root: [CAMERA] config camera.source='canon' index='auto'
+2026-10-02 00:19:44 [INFO] root: [CAMERA] source=canon (Canon DSLR via EDSDK)
+2026-10-02 00:19:44 [INFO] canon_edsdk: [CANON] session opened
+2026-10-02 00:19:44 [ERROR] canon_edsdk: [CANON] startup failed: EdsSetPropertyData(0xB) failed: EDS_ERR 0x00000081
+2026-10-02 00:19:45 [INFO] canon_edsdk: [CANON] session closed
+2026-10-02 00:19:45 [INFO] canon_edsdk: [CANON] EDSDK stopped, camera released
+2026-10-02 00:19:45 [ERROR] root: [CANON] camera lost: Camera startup failed: EdsSetPropertyData(0xB) failed: EDS_ERR 0x00000081 - EDSDK stopped
+2026-10-02 00:19:49 [DEBUG] PIL.Image: Importing PngImagePlugin
+2026-10-02 00:19:49 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-02 00:19:49 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-02 00:19:49 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-02 00:25:04 [INFO] root: ============================================================
+2026-10-02 00:25:04 [INFO] root: Photobooth Ceria starting up
+2026-10-02 00:25:04 [INFO] root:   Python:    3.13.15
+2026-10-02 00:25:04 [INFO] root:   Platform:  Windows 10
+2026-10-02 00:25:04 [INFO] root:   Frozen:    False
+2026-10-02 00:25:04 [INFO] root:   BASE_DIR:  c:\Users\USER\Documents\photobooth
+2026-10-02 00:25:04 [INFO] root:   Log file:  c:\Users\USER\Documents\photobooth\logs\photobooth_20261002.log
+2026-10-02 00:25:04 [INFO] root: ============================================================
+2026-10-02 00:25:05 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
+2026-10-02 00:25:05 [INFO] root: [UI] screen 1366x738 — applying UI scale 0.683
+2026-10-02 00:25:06 [INFO] root: [CAMERA] config camera.source='canon' index='auto'
+2026-10-02 00:25:06 [INFO] root: [CAMERA] source=canon (Canon DSLR via EDSDK)
+2026-10-02 00:25:06 [ERROR] canon_edsdk: [CANON] startup failed: No Canon camera found. Is it on, in a photo mode (not video/playback), and USB-connected?
+2026-10-02 00:25:06 [INFO] canon_edsdk: [CANON] EDSDK stopped, camera released
+2026-10-02 00:25:06 [ERROR] root: [CANON] camera lost: Camera startup failed: No Canon camera found. Is it on, in a photo mode (not video/playback), and USB-connected? - EDSDK stopped
+2026-10-02 00:25:10 [DEBUG] PIL.Image: Importing PngImagePlugin
+2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
