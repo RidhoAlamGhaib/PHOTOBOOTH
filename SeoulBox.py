@@ -4089,11 +4089,26 @@ class MainWindow(QMainWindow):
             if area < min_area: continue
             if cw > 0.95 * w and ch > 0.95 * h: continue
             candidates.append((x, y, cw, ch, area))
-        if len(candidates) < target_count:
-            self._slot_rect_cache[path_key] = None
-            return None
         candidates.sort(key=lambda r: r[4], reverse=True)
-        candidates = candidates[:target_count]
+        fname = Path(str(self.overlay_path or "")).name
+        if len(candidates) < target_count:
+            if not candidates:
+                self._slot_rect_cache[path_key] = None
+                return None
+            # Use the frame's own holes rather than a generic grid that ignores it.
+            LOG.warning(f"[FRAME] {fname}: {len(candidates)} photo slots but layout "
+                        f"has {target_count} poses - extra photos are left out")
+        elif len(candidates) > target_count:
+            # Extra holes the same size as real slots are slots too (frame made
+            # for more poses than the layout): fill them instead of leaving
+            # them empty. Much smaller holes stay decoration.
+            nth = candidates[target_count - 1][4]
+            extra = [c for c in candidates[target_count:] if c[4] >= 0.8 * nth]
+            if extra:
+                LOG.warning(f"[FRAME] {fname}: {target_count + len(extra)} photo slots "
+                            f"but layout has {target_count} poses - repeating photos "
+                            f"(set \"poses\": {target_count + len(extra)} for this layout)")
+            candidates = candidates[:target_count] + extra
         rects = [(x, y, cw, ch) for (x, y, cw, ch, _) in candidates]
         order = None
         try:
@@ -4186,6 +4201,8 @@ class MainWindow(QMainWindow):
                 pose_idx = slot_to_pose[slot_idx] if slot_idx < len(slot_to_pose) else slot_idx
             else:
                 pose_idx = slot_idx
+            if pose_idx >= len(self.captured_frames) and self.captured_frames:
+                pose_idx %= len(self.captured_frames)   # more slots than photos
             if 0 <= pose_idx < len(self.captured_frames):
                 slot_pose_pairs.append((rect, pose_idx))
         canvas = Image.new("RGBA", (ow, oh), (255, 255, 255, 255))
