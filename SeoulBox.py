@@ -27,7 +27,7 @@ from functools import partial
 import cv2
 import numpy as np
 from PIL import Image
-from effects import EFFECT_IDS, EFFECT_LABELS, apply_effect
+from effects import EFFECT_IDS, EFFECT_LABELS, apply_effect, detect_faces
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
@@ -769,6 +769,82 @@ class CameraThread(QThread):
 
 
 SLOT_ALPHA_MAX = 128   # overlay alpha below this = photo hole
+
+
+def _hole_masks(alpha, rects):
+    """For each slot rect, the mask (rect-sized, uint8 0/255) of the frame's
+    own hole in it - so slanted holes whose bounding boxes overlap don't
+    show each other's photo. None when a rect matches no hole (plain grid)."""
+    hole = (alpha < SLOT_ALPHA_MAX).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(hole, connectivity=4)
+    out = []
+    for (x, y, w, h) in rects:
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        lbl = None
+        for i in range(1, n):
+            sx, sy, sw, sh, _ = stats[i]
+            if (sx, sy, sw, sh) == (x, y, w, h):
+                lbl = i
+                break
+        if lbl is None:
+            out.append(None)
+            continue
+        m = (labels[y:y + h, x:x + w] == lbl).astype(np.uint8) * 255
+        # Grow 3 px under the frame's anti-aliased edge so no white seam shows.
+        out.append(cv2.dilate(m, np.ones((7, 7), np.uint8)))
+    return out
+
+
+def place_photo_in_hole(canvas, img_bgr, rect, mask, fit_mode="cover"):
+    """Paste a photo into one frame hole, pasted only inside the hole mask.
+    The face (or the photo centre if no face is found) is put where the hole
+    is visible at face height (~40% down), and the photo is scaled just
+    enough to still cover the whole hole - so slanted / odd-shaped holes
+    don't cut faces off."""
+    x, y, w, h = [int(v) for v in rect]
+    if w < 1 or h < 1:
+        return
+    if mask is None or not mask.any() or (mask > 0).mean() > 0.97:
+        # Plain rectangular hole: classic centre crop.
+        img = crop_center_to_aspect(img_bgr, w, h, fit_mode=fit_mode)
+        if mask is None:
+            canvas.paste(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), (x, y))
+        else:
+            canvas.paste(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), (x, y),
+                         Image.fromarray(mask, "L"))
+        return
+    PH, PW = img_bgr.shape[:2]
+    # Target point: horizontal middle of the visible hole around 40% height.
+    vis = mask > 0
+    ty = 0.4 * h
+    band = vis[int(h * 0.3):max(int(h * 0.3) + 1, int(h * 0.5))]
+    cols = np.where(band.any(axis=0))[0]
+    tx = (cols.min() + cols.max()) / 2.0 if cols.size else w / 2.0
+    # Anchor in the photo: centre of the faces, else photo centre (40% down).
+    fx, fy = PW / 2.0, PH * 0.4
+    try:
+        faces = detect_faces(img_bgr)
+        if faces:
+            xs = [f["box"][0] for f in faces] + [f["box"][0] + f["box"][2] for f in faces]
+            ys = [f["box"][1] + f["box"][3] / 2 for f in faces]
+            fx, fy = (min(xs) + max(xs)) / 2.0, sum(ys) / len(ys)
+    except Exception:
+        pass
+    fx = min(max(fx, 1.0), PW - 1.0)
+    fy = min(max(fy, 1.0), PH - 1.0)
+    cover = max(w / float(PW), h / float(PH))
+    sc = max(cover, tx / fx, (w - tx) / (PW - fx), ty / fy, (h - ty) / (PH - fy))
+    sc = min(sc, cover * 1.3)          # zoom a little at most; shift the rest
+    ox = tx - fx * sc                  # photo origin in rect coords
+    oy = ty - fy * sc
+    sw, sh = PW * sc, PH * sc
+    ox = min(0.0, max(ox, w - sw))     # keep the hole fully covered
+    oy = min(0.0, max(oy, h - sh))
+    M = np.float32([[sc, 0, ox], [0, sc, oy]])
+    piece = cv2.warpAffine(img_bgr, M, (w, h), flags=cv2.INTER_AREA if sc < 1 else cv2.INTER_LINEAR,
+                           borderMode=cv2.BORDER_REPLICATE)
+    canvas.paste(Image.fromarray(cv2.cvtColor(piece, cv2.COLOR_BGR2RGB)), (x, y),
+                 Image.fromarray(mask, "L"))
 
 
 def fallback_slot_rects(ow, oh, n):
@@ -4228,15 +4304,22 @@ class MainWindow(QMainWindow):
         flt = getattr(self, "current_filter", "none")
         bty = float(CONFIG.get("beautify_strength", 0.0))
         if has_transparent_slots:
-            for (rect, pose_idx) in slot_pose_pairs:
+            masks = _hole_masks(np.array(overlay)[:, :, 3], [r for r, _ in slot_pose_pairs])
+            for (rect, pose_idx), mask in zip(slot_pose_pairs, masks):
                 x, y, cw, ch = rect
                 if cw < 1 or ch < 1: continue
                 f = self.captured_frames[pose_idx]
-                img_bgr = crop_center_to_aspect(f, cw, ch, fit_mode=getattr(self, "fit_mode", "cover"))
+                # Filter at about the size it will be placed, then position it.
+                if mask is None:
+                    img_bgr = crop_center_to_aspect(f, cw, ch, fit_mode=getattr(self, "fit_mode", "cover"))
+                else:
+                    sc = 2.0 * max(cw, ch) / float(max(f.shape[:2]))
+                    img_bgr = cv2.resize(f, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA) \
+                        if sc < 1.0 else f
                 if bty > 0: img_bgr = beautify(img_bgr, bty)
                 img_bgr = apply_filter(img_bgr, flt)
-                img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-                canvas.paste(img, (x, y))
+                place_photo_in_hole(canvas, img_bgr, rect, mask,
+                                    fit_mode=getattr(self, "fit_mode", "cover"))
             canvas.paste(overlay, (0, 0), overlay)
         else:
             canvas.paste(overlay, (0, 0), overlay)
