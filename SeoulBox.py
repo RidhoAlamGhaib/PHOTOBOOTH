@@ -115,6 +115,8 @@ _FALLBACK_DEFAULTS = {
     # Seconds to let the camera start (fresh connection each session)
     # before the first shot's countdown begins.
     "camera_warmup_seconds":   5,
+    # Mirror preview + photos (selfie view: customer's left stays on the left).
+    "mirror":                  True,
     "max_retakes_per_shot":    2,
     "review_auto_confirm_seconds": 5,
     "shots_per_session":       4,
@@ -494,7 +496,7 @@ class PastelBackground(QWidget):
         self._stickers = [(rnd.choice((rnd.uniform(0.02, 0.22), rnd.uniform(0.78, 0.97))),
                            rnd.random(), rnd.choice(self.STICKERS),
                            rnd.choice(palette), rnd.randint(16, 34))
-                          for _ in range(28)]
+                          for _ in range(0)]   # sticker glyphs disabled (clean look)
 
     def resizeEvent(self, e):
         self._cache = None
@@ -561,9 +563,9 @@ class PolaroidCluster(QWidget):
         p.setRenderHint(QPainter.TextAntialiasing)
         k = self.height() / 300.0
         cw, ch = 180 * k, 220 * k
-        specs = ((-12, 0.24, COLORS["lilac"], COLORS["lilac_soft"], "\U0001F4F8", "cheese!"),
-                 (9, 0.76, COLORS["mint"], COLORS["mint_soft"], "\u2661", "bestie"),
-                 (-2, 0.50, COLORS["pink"], COLORS["pink_soft"], "\u273f", "seoul \u2661"))
+        specs = ((-12, 0.24, COLORS["lilac"], COLORS["lilac_soft"], "", "cheese!"),
+                 (9, 0.76, COLORS["mint"], COLORS["mint_soft"], "", "bestie"),
+                 (-2, 0.50, COLORS["pink"], COLORS["pink_soft"], "", "seoul"))
         for angle, fx, col, soft, glyph, cap in specs:
             p.save()
             p.translate(self.width() * fx, self.height() * 0.5)
@@ -1709,7 +1711,7 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(80, 40, 80, 40)
         root.setSpacing(0)
         root.addStretch(1)
-        eyebrow = QLabel(f"\u273f  {CONFIG['ui']['studio_name']}  \u273f")
+        eyebrow = QLabel(f"{CONFIG['ui']['studio_name']}")
         eyebrow.setStyleSheet(f"""
             color: {COLORS['pink_dk']}; background: white;
             border: 2px solid {COLORS['pink_soft']}; border-radius: 22px;
@@ -1736,7 +1738,7 @@ class MainWindow(QMainWindow):
         """)
         root.addWidget(tagline)
         root.addSpacing(40)
-        self.btn_start = QPushButton(f"\U0001F4F8   {CONFIG['ui']['start_button']}")
+        self.btn_start = QPushButton(f"{CONFIG['ui']['start_button']}")
         self.btn_start.setFixedHeight(104)
         self.btn_start.setMinimumWidth(440)
         self.btn_start.setCursor(Qt.PointingHandCursor)
@@ -1755,7 +1757,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.btn_start, 0, Qt.AlignHCenter)
         root.addSpacing(20)
         extra = max(0, int(CONFIG.get("extra_shots", 0) or 0))
-        hint_txt = "tap tombol di atas untuk mulai  \u2661"
+        hint_txt = "tap tombol di atas untuk mulai"
         if extra > 0:
             hint_txt += f"   \u00b7   +{extra} foto bonus, pilih favoritmu"
         hint = QLabel(hint_txt)
@@ -1793,7 +1795,7 @@ class MainWindow(QMainWindow):
         screen = QWidget()
         screen.setStyleSheet("background: transparent;")
         self.layout_screen = screen
-        eyebrow = QLabel("\u273f  LANGKAH 1 DARI 2  \u273f", screen)
+        eyebrow = QLabel("LANGKAH 1 DARI 2", screen)
         eyebrow.setAlignment(Qt.AlignCenter)
         eyebrow.setStyleSheet(f"""
             color: {COLORS['yellow']}; font-size: 16px; font-weight: 700;
@@ -2144,7 +2146,7 @@ class MainWindow(QMainWindow):
         self.flash_icon = QLabel()
         self.flash_icon.setFixedSize(48, 48)
         self.flash_icon.setStyleSheet("background: white; border-radius: 24px;")
-        self.icons.request("flash", 32, partial(self._set_label_pixmap, self.flash_icon))
+        self.flash_icon.hide()
         tb_l.addWidget(self.flash_icon, 0, Qt.AlignRight)
         self._rec_blink_timer = QTimer(self)
         self._rec_blink_timer.setInterval(600)
@@ -2164,7 +2166,7 @@ class MainWindow(QMainWindow):
         self.countdown_label.setStyleSheet("color: white; background: transparent; font-weight: 900;")
         self.countdown_label.hide()
         self._add_shadow(self.countdown_label, blur=40, y_offset=4, alpha=180)
-        self.ready_banner = QLabel("\u273f  Siap-siap ya!  \u273f", self.preview_container)
+        self.ready_banner = QLabel("Siap-siap ya!", self.preview_container)
         self.ready_banner.setAlignment(Qt.AlignCenter)
         self.ready_banner.setStyleSheet(f"""
             background: white; color: {COLORS['ink']}; border: 3px solid {COLORS['pink_soft']};
@@ -2219,8 +2221,8 @@ class MainWindow(QMainWindow):
         rv_l.setContentsMargins(0, 0, 0, 0)
         rv_l.setSpacing(24)
         rv_l.addStretch()
-        self.btn_retake = QPushButton("🔄  Retry (2)")
-        self.btn_next   = QPushButton("➡  Next")
+        self.btn_retake = QPushButton("Retry (2)")
+        self.btn_next   = QPushButton("Next")
         for btn in (self.btn_retake, self.btn_next):
             btn.setFixedSize(220, 80)
             btn.setCursor(Qt.PointingHandCursor)
@@ -2253,7 +2255,7 @@ class MainWindow(QMainWindow):
     def _style_retake_button(self, enabled, remaining):
         if enabled:
             self.btn_retake.setEnabled(True)
-            self.btn_retake.setText(f"🔄  Retry ({remaining})")
+            self.btn_retake.setText(f"Retry ({remaining})")
             self.btn_retake.setStyleSheet(f"""
                 QPushButton {{
                     background: {COLORS['lilac']}; color: white; border: 3px solid white;
@@ -2263,7 +2265,7 @@ class MainWindow(QMainWindow):
             """)
         else:
             self.btn_retake.setEnabled(False)
-            self.btn_retake.setText("🔄  Retry (0)")
+            self.btn_retake.setText("Retry (0)")
             self.btn_retake.setStyleSheet("""
                 QPushButton {
                     background: #EFE3EA; color: #C4B2C0;
@@ -2275,7 +2277,7 @@ class MainWindow(QMainWindow):
         screen = QWidget()
         screen.setStyleSheet("background: transparent;")
         self.frames_screen = screen
-        title = QLabel("Pilih Frame \u273f", screen)
+        title = QLabel("Pilih Frame", screen)
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 48px; font-weight: 800; font-family: '{FONT_DISPLAY}'; background: transparent;")
         self._fp_title = title
@@ -2424,7 +2426,7 @@ class MainWindow(QMainWindow):
         ec = QVBoxLayout(self.extra_card)
         ec.setContentsMargins(16, 12, 16, 12)
         ec.setSpacing(6)
-        ec_title = QLabel("\U0001F5A8  CETAK TAMBAHAN")
+        ec_title = QLabel("CETAK TAMBAHAN")
         ec_title.setAlignment(Qt.AlignCenter)
         ec_title.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 13px; font-weight: 800; "
                                f"letter-spacing: 3px; background: transparent; border: none;")
@@ -2522,7 +2524,7 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(80, 80, 80, 80)
         root.setSpacing(0)
         root.addStretch(1)
-        eyebrow = QLabel("\u273f  MEMPROSES  \u273f")
+        eyebrow = QLabel("MEMPROSES")
         eyebrow.setAlignment(Qt.AlignCenter)
         eyebrow.setStyleSheet(f"color: {COLORS['yellow']}; font-size: 18px; font-weight: 700; letter-spacing: 12px; background: transparent;")
         root.addWidget(eyebrow)
@@ -2576,12 +2578,12 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(80, 80, 80, 80)
         root.setSpacing(0)
         root.addStretch(1)
-        eyebrow = QLabel("\u273f  SELESAI  \u273f")
+        eyebrow = QLabel("SELESAI")
         eyebrow.setAlignment(Qt.AlignCenter)
         eyebrow.setStyleSheet(f"color: {COLORS['yellow']}; font-size: 18px; font-weight: 700; letter-spacing: 12px; background: transparent;")
         root.addWidget(eyebrow)
         root.addSpacing(24)
-        title = QLabel("Yay! Fotomu sudah jadi \u2661")
+        title = QLabel("Yay! Fotomu sudah jadi")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 56px; font-weight: 800; font-family: '{FONT_DISPLAY}'; background: transparent;")
         root.addWidget(title)
@@ -2656,7 +2658,7 @@ class MainWindow(QMainWindow):
         body.addStretch()
         root.addLayout(body)
         root.addSpacing(56)
-        self.btn_home = QPushButton("\u273f  Sesi Berikutnya")
+        self.btn_home = QPushButton("Sesi Berikutnya")
         self.btn_home.setFixedHeight(80)
         self.btn_home.setMinimumWidth(320)
         self.btn_home.setCursor(Qt.PointingHandCursor)
@@ -2688,7 +2690,7 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
         root.addStretch(1)
 
-        eyebrow = QLabel("\u273f  LANGKAH 2 DARI 2  \u273f")
+        eyebrow = QLabel("LANGKAH 2 DARI 2")
         eyebrow.setAlignment(Qt.AlignCenter)
         eyebrow.setStyleSheet(f"color: {COLORS['yellow']}; font-size: 16px; font-weight: 700; letter-spacing: 10px; background: transparent;")
         root.addWidget(eyebrow)
@@ -2838,7 +2840,7 @@ class MainWindow(QMainWindow):
 
     def _code_submit(self):
         if len(self._code_buffer) != 9:
-            self.code_status.setText("⚠  Masukkan 9 digit lengkap dulu")
+            self.code_status.setText("Masukkan 9 digit lengkap dulu")
             return
         result = _check_and_use_code(self._code_buffer)
         if result == "ok":
@@ -2854,11 +2856,11 @@ class MainWindow(QMainWindow):
             self._session_access_code = entered
             QTimer.singleShot(200, self._start_session)
         elif result == "used":
-            self.code_status.setText("✗  Kode sudah pernah dipakai")
+            self.code_status.setText("Kode sudah pernah dipakai")
         elif result == "invalid":
-            self.code_status.setText("✗  Kode tidak valid")
+            self.code_status.setText("Kode tidak valid")
         else:
-            self.code_status.setText("⚠  Error baca file kode")
+            self.code_status.setText("Error baca file kode")
 
     def _goto_code_input(self):
         """Show the code input screen. Called after layout pick."""
@@ -2958,6 +2960,11 @@ class MainWindow(QMainWindow):
         self.review_widget.setGeometry((sw - rv_w) // 2, sh - pp_h - bottom_pad - rv_h - 12, rv_w, rv_h)
 
     def _update_preview(self, frame, raw_frame, is_cropped):
+        if CONFIG.get("mirror", True):
+            # Selfie view: customer's left on the left. Applied here so the
+            # preview, webcam stills, BTS and moving clips all match.
+            frame = cv2.flip(frame, 1)
+            raw_frame = cv2.flip(raw_frame, 1)
         self.last_raw_frame = frame
         self._last_uncropped_frame = raw_frame
         self._cam_frame_seen = True
@@ -3388,7 +3395,7 @@ class MainWindow(QMainWindow):
         self._cam_warming = True
         self.current_count = max(0, int(CONFIG.get("camera_warmup_seconds", 5)))
         self._warm_deadline = time.time() + self.current_count + 15
-        self.ready_banner.setText("\u273f  Menyiapkan kamera\u2026  \u273f")
+        self.ready_banner.setText("Menyiapkan kamera\u2026")
         self.ready_banner.show()
         self.ready_banner.raise_()
         self.countdown_label.show()
@@ -3412,7 +3419,7 @@ class MainWindow(QMainWindow):
         if not self._cam_frame_seen:
             LOG.warning("[CAMERA] no live frame after warm-up; starting anyway")
         self._cam_warming = False
-        self.ready_banner.setText("\u273f  Siap-siap ya!  \u273f")
+        self.ready_banner.setText("Siap-siap ya!")
         self._start_capture_cycle()
 
     def _reset_slots(self):
@@ -3448,7 +3455,7 @@ class MainWindow(QMainWindow):
         step = min(self.current_step, T)
         txt = f"Foto {step} / {T}"
         if step > N:
-            txt += "  \u00b7  bonus \u273f"
+            txt += "  \u00b7  bonus"
         self.progress_text.setText(txt)
 
     def _start_capture_cycle(self):
@@ -3494,7 +3501,7 @@ class MainWindow(QMainWindow):
         self._pending_moving_clip = list(self.rolling_buffer)
         self._canon_waiting = True
         try:
-            self.countdown_label.setText("📸")
+            self.countdown_label.setText("")
             self.countdown_label.show()
             self.countdown_label.raise_()
         except Exception:
@@ -3511,6 +3518,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         aspect = float(getattr(self.camera, "target_aspect", 3 / 4) or 3 / 4)
+        if CONFIG.get("mirror", True):
+            img = cv2.flip(img, 1)   # match the mirrored live view
         self._show_shot_review(
             _crop_to_aspect(img, aspect, self._canon_max_long))
 
@@ -3560,14 +3569,14 @@ class MainWindow(QMainWindow):
             self._review_auto_timer = QTimer(self)
             self._review_auto_timer.setInterval(1000)
             self._review_auto_timer.timeout.connect(self._on_review_auto_tick)
-        self.btn_next.setText(f"➡  Next ({self._review_auto_secs})")
+        self.btn_next.setText(f"Next ({self._review_auto_secs})")
         self._review_auto_timer.start()
 
     def _stop_review_auto_confirm(self):
         if hasattr(self, "_review_auto_timer") and self._review_auto_timer:
             self._review_auto_timer.stop()
         try:
-            self.btn_next.setText("➡  Next")
+            self.btn_next.setText("Next")
         except Exception:
             pass
 
@@ -3577,7 +3586,7 @@ class MainWindow(QMainWindow):
             self._stop_review_auto_confirm()
             self._next_photo()
         else:
-            self.btn_next.setText(f"➡  Next ({self._review_auto_secs})")
+            self.btn_next.setText(f"Next ({self._review_auto_secs})")
 
     def _retake_photo(self):
         if self.retakes_used >= self.max_retakes_per_shot:
@@ -3643,7 +3652,7 @@ class MainWindow(QMainWindow):
         screen = QWidget()
         screen.setStyleSheet("background: transparent;")
         self.pick_screen = screen
-        self._pick_title = QLabel("Pilih Foto Favoritmu \u273f", screen)
+        self._pick_title = QLabel("Pilih Foto Favoritmu", screen)
         self._pick_title.setAlignment(Qt.AlignCenter)
         self._pick_title.setStyleSheet(
             f"color: {COLORS['ink']}; font-size: 52px; font-weight: 800; "
@@ -3675,7 +3684,7 @@ class MainWindow(QMainWindow):
         self.pick_cards = []
         self._pick_order = []
         self._pick_pix = []
-        self.btn_pick_reset = QPushButton("\u21ba  Ulang Pilih", screen)
+        self.btn_pick_reset = QPushButton("Ulang Pilih", screen)
         self.btn_pick_reset.setCursor(Qt.PointingHandCursor)
         self.btn_pick_reset.setStyleSheet(f"""
             QPushButton {{
@@ -3744,7 +3753,7 @@ class MainWindow(QMainWindow):
             img.setAlignment(Qt.AlignCenter)
             img.setAttribute(Qt.WA_TransparentForMouseEvents)
             img.setStyleSheet("background: transparent; border: none;")
-            cap = QLabel(f"#{i + 1}" + ("   bonus \u273f" if i >= N else ""), card)
+            cap = QLabel(f"#{i + 1}" + ("   bonus" if i >= N else ""), card)
             cap.setAlignment(Qt.AlignCenter)
             cap.setAttribute(Qt.WA_TransparentForMouseEvents)
             cap.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; font-weight: 800; "
@@ -3845,7 +3854,7 @@ class MainWindow(QMainWindow):
         k = len(self._pick_order)
         M = self._pick_max()
         extra = f"  (maks {M})" if M > N else ""
-        self._pick_counter.setText(f"\u2661  {k} dipilih  \u00b7  min {N}{extra}")
+        self._pick_counter.setText(f"{k} dipilih  \u00b7  min {N}{extra}")
         ready = (N <= k <= M)
         self.btn_pick_next.setEnabled(ready)
         if ready:
@@ -4342,7 +4351,7 @@ class MainWindow(QMainWindow):
         If url is None (upload failed), show a placeholder + status text."""
         if not folder_url:
             self.done_qr_label.clear()
-            self.done_qr_label.setText("♡")
+            self.done_qr_label.setText("")
             self.done_qr_label.setStyleSheet(
                 "background: rgba(255,255,255,0.7); color: #FFB3CD; "
                 "border: 3px dashed #FFC2D8; border-radius: 22px; font-size: 72px; font-weight: 900;")
@@ -4373,7 +4382,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             LOG.error(f"[DONE] QR render failed: {e}")
             self.done_qr_label.clear()
-            self.done_qr_label.setText("⚠")
+            self.done_qr_label.setText("QR")
             self.done_qr_status.setText(f"QR gagal dirender: {e}")
 
     def _goto_done(self):
@@ -4392,7 +4401,7 @@ class MainWindow(QMainWindow):
         folder_url = getattr(self, "_pending_folder_url", None)
         self._render_done_qr(folder_url)
 
-        self.done_status.setText("⚙  GENERATE VIDEO…")
+        self.done_status.setText("GENERATE VIDEO…")
         self.stack.setCurrentIndex(self.SCREEN_DONE)
 
         # Record the session count (local persistent append-only log).
@@ -4465,7 +4474,7 @@ class MainWindow(QMainWindow):
     def _on_videos_done(self, paths, errors, png_path=None, bts_mp4=None, mov_mp4=None):
         if errors:
             LOG.warning(f"[SAVE] video errors: {errors}")
-        self.done_status.setText("☁  UPLOADING TO DRIVE…")
+        self.done_status.setText("UPLOADING TO DRIVE…")
         files_to_upload = []
         if png_path is not None and Path(png_path).exists():
             files_to_upload.append(("foto.png", Path(png_path)))
@@ -4476,7 +4485,7 @@ class MainWindow(QMainWindow):
         indiv_job = getattr(self, "_indiv_job", None)
         upload_indiv = bool((CONFIG.get("individual_photos", {}) or {}).get("upload", True))
         if not files_to_upload and not (indiv_job and upload_indiv):
-            self.done_status.setText("\u2713  DONE")
+            self.done_status.setText("DONE")
             return
 
         # Reuse the subfolder + uploader created during the prep step.
@@ -4487,7 +4496,7 @@ class MainWindow(QMainWindow):
         if not folder_id or uploader is None:
             reason = getattr(self, "_pending_upload_reason", None) or "periksa koneksi internet"
             LOG.warning(f"[GDRIVE] no folder/uploader from prep \u2014 skipping upload ({reason})")
-            self.done_status.setText(f"\u2717  SOFT FILE TIDAK TER-UPLOAD \u2014 {reason}")
+            self.done_status.setText(f"SOFT FILE TIDAK TER-UPLOAD \u2014 {reason}")
             return
         folder_url = self._pending_folder_url
 
@@ -4495,7 +4504,7 @@ class MainWindow(QMainWindow):
             queue = [(n, p, folder_id) for n, p in files_to_upload]
             if indiv_job is not None and upload_indiv:
                 self._ui(lambda: self.done_status.setText(
-                    "\u2601  MENYIAPKAN FOTO INDIVIDU\u2026"))
+                    "MENYIAPKAN FOTO INDIVIDU\u2026"))
                 indiv_job["done"].wait(timeout=180)
                 if indiv_job["files"]:
                     sub = uploader.create_folder("foto-individu", parent_id=folder_id)
@@ -4505,14 +4514,14 @@ class MainWindow(QMainWindow):
             failed = 0
             for i, (remote_name, local, parent) in enumerate(queue, 1):
                 self._ui(lambda i=i, t=total, n=remote_name:
-                    self.done_status.setText(f"\u2601  UPLOADING {n}  ({i}/{t})"))
+                    self.done_status.setText(f"UPLOADING {n}  ({i}/{t})"))
                 if uploader.upload_file(local, remote_name=remote_name, parent_id=parent) is None:
                     failed += 1
             if failed:
                 self._ui(lambda f=failed, t=total: self.done_status.setText(
-                    f"\u26a0  {f}/{t} FILE GAGAL UPLOAD"))
+                    f"{f}/{t} FILE GAGAL UPLOAD"))
             else:
-                self._ui(lambda: self.done_status.setText("\u2713  ALL FILES UPLOADED"))
+                self._ui(lambda: self.done_status.setText("ALL FILES UPLOADED"))
             LOG.info(f"[GDRIVE] session done: {folder_url} ({total - failed}/{total} ok)")
 
         threading.Thread(target=_upload_session, daemon=True).start()
@@ -4579,7 +4588,7 @@ class MainWindow(QMainWindow):
             f"File lengkap: {STATS_FILE}\n"
             f"(juga ke-upload ke GDrive sebagai _SESSION_STATS.json)"
         )
-        QMessageBox.information(self, "📊 Log Sesi (Admin)", msg)
+        QMessageBox.information(self, "Log Sesi (Admin)", msg)
 
 
 def _apply_ui_scaling(app):
