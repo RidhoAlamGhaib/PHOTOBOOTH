@@ -237,6 +237,28 @@ class CanonCamera:
         if code != EDS_ERR_OK:
             raise EdsError(func, code)
 
+    # How long to keep retrying a call the camera answers with DEVICE_BUSY.
+    # Right after a previous app quit / session close the body can stay busy
+    # for a few seconds while it tears down live view.
+    BUSY_RETRY_S = 10.0
+
+    def _call_retry_busy(self, fn, func_name, timeout=None):
+        """Run fn() -> EdsError code; retry while the camera reports
+        EDS_ERR_DEVICE_BUSY (pumping events in between), else _check it."""
+        deadline = time.time() + (self.BUSY_RETRY_S if timeout is None else timeout)
+        tries = 0
+        while True:
+            code = fn() & 0xFFFFFFFF
+            if code != EDS_ERR_DEVICE_BUSY or time.time() >= deadline:
+                if tries:
+                    LOG.info(f"[CANON] {func_name}: busy x{tries}, "
+                             f"result 0x{code:08X}")
+                self._check(code, func_name)
+                return
+            tries += 1
+            self._pump_events()
+            time.sleep(0.3)
+
     def _pump_events(self):
         # On Windows, drives EDSDK's internal event queue (fires our callback).
         try:
@@ -267,21 +289,30 @@ class CanonCamera:
         finally:
             self._dll.EdsRelease(cam_list)
 
-        self._check(self._dll.EdsOpenSession(self._camera), "EdsOpenSession")
+        self._call_retry_busy(lambda: self._dll.EdsOpenSession(self._camera),
+                              "EdsOpenSession")
         LOG.info("[CANON] session opened")
         # Safety net: if the process exits without close() (crash, killed
         # window), still release the session so the body doesn't stay busy.
         atexit.register(self.close)
 
-        # Download to host (PC), not the SD card.
-        self._set_prop_u32(kEdsPropID_SaveTo, kEdsSaveTo_Host)
-        # Tell the camera the host has "space" so it will release the shutter.
-        cap = EdsCapacity(0x7FFFFFFF, 0x1000, 1)
-        self._check(self._dll.EdsSetCapacity(self._camera, cap), "EdsSetCapacity")
-        # Register the handler that downloads each new full-res image.
-        self._check(self._dll.EdsSetObjectEventHandler(
-            self._camera, kEdsObjectEvent_All, self._obj_cb, None),
-            "EdsSetObjectEventHandler")
+        try:
+            # Download to host (PC), not the SD card. Retries while the body
+            # is still busy from the previous session (EDS_ERR 0x81).
+            self._set_prop_u32(kEdsPropID_SaveTo, kEdsSaveTo_Host)
+            # Tell the camera the host has "space" so it will release the shutter.
+            cap = EdsCapacity(0x7FFFFFFF, 0x1000, 1)
+            self._call_retry_busy(lambda: self._dll.EdsSetCapacity(self._camera, cap),
+                                  "EdsSetCapacity")
+            # Register the handler that downloads each new full-res image.
+            self._check(self._dll.EdsSetObjectEventHandler(
+                self._camera, kEdsObjectEvent_All, self._obj_cb, None),
+                "EdsSetObjectEventHandler")
+        except Exception:
+            # Don't leave a half-open session behind: that is what keeps the
+            # camera busy for the next run.
+            self.close()
+            raise
         return self
 
     def close(self):
@@ -298,6 +329,12 @@ class CanonCamera:
                 self.stop_live_view()
         except Exception:
             pass
+        # Let the body finish switching live view off before we hang up,
+        # so the next open() doesn't find it busy.
+        if self._sdk_inited:
+            for _ in range(5):
+                self._pump_events()
+                time.sleep(0.05)
         try:
             if self._camera is not None:
                 self._dll.EdsCloseSession(self._camera)
@@ -314,11 +351,11 @@ class CanonCamera:
             LOG.warning(f"[CANON] terminate SDK error: {e}")
 
     # ---- properties ----------------------------------------------------------
-    def _set_prop_u32(self, prop_id, value):
+    def _set_prop_u32(self, prop_id, value, busy_timeout=None):
         data = c_uint32(value)
-        self._check(self._dll.EdsSetPropertyData(
-            self._camera, prop_id, 0, 4, byref(data)),
-            f"EdsSetPropertyData(0x{prop_id:X})")
+        self._call_retry_busy(
+            lambda: self._dll.EdsSetPropertyData(self._camera, prop_id, 0, 4, byref(data)),
+            f"EdsSetPropertyData(0x{prop_id:X})", timeout=busy_timeout)
 
     # ---- live view -----------------------------------------------------------
     def start_live_view(self):
@@ -332,7 +369,7 @@ class CanonCamera:
         if not self._live:
             return
         try:
-            self._set_prop_u32(kEdsPropID_Evf_OutputDevice, 0)
+            self._set_prop_u32(kEdsPropID_Evf_OutputDevice, 0, busy_timeout=3.0)
         except Exception as e:
             LOG.warning(f"[CANON] stop live view: {e}")
         self._live = False
