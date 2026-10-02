@@ -1,5 +1,6 @@
 {
   "countdown_seconds": 10,
+  "camera_warmup_seconds": 5,
   "max_retakes_per_shot": 2,
   "review_auto_confirm_seconds": 5,
   "shots_per_session": 4,

@@ -112,6 +112,9 @@ MAX_SLOTS = 12   # poses (max 8) + bonus shots
 
 _FALLBACK_DEFAULTS = {
     "countdown_seconds":       10,
+    # Seconds to let the camera start (fresh connection each session)
+    # before the first shot's countdown begins.
+    "camera_warmup_seconds":   5,
     "max_retakes_per_shot":    2,
     "review_auto_confirm_seconds": 5,
     "shots_per_session":       4,
@@ -1601,12 +1604,28 @@ class MainWindow(QMainWindow):
         self._build_pick_screen()
         self.stack.setCurrentIndex(self.SCREEN_HOME)
         self._load_frames()
+        self.canon_mode = False
+        self._canon_waiting = False
+        self._cam_warming = False
+        self._cam_frame_seen = False
+        self._warm_token = 0
+        self.fit_mode = str((CONFIG.get("camera", {}) or {}).get("fit_mode", "cover")).lower()
+        if self.fit_mode not in ("cover", "contain"):
+            self.fit_mode = "cover"
+        # The camera is opened per session (_start_session) and released when
+        # the session goes to print, so every session gets a fresh EDSDK/OpenCV
+        # connection instead of one long-lived handle that goes stale.
+        self.camera = None
+        QTimer.singleShot(0, self._fit_capture_layout)
+
+    # ================= CAMERA LIFECYCLE (one connection per session) =================
+    def _create_camera(self):
+        """Open a fresh camera thread (Canon via EDSDK, or OpenCV webcam)."""
         cam_cfg = CONFIG.get("camera", {}) or {}
         cam_index = cam_cfg.get("index", "auto")
         cam_source = str(cam_cfg.get("source", "opencv")).lower()
         LOG.info(f"[CAMERA] config camera.source={cam_source!r} index={cam_index!r}")
         self.canon_mode = False
-        self._canon_waiting = False
         self._canon_max_long = cam_cfg.get("canon_max_long_side", 3000)
         if cam_source == "canon":
             try:
@@ -1642,8 +1661,36 @@ class MainWindow(QMainWindow):
             self.camera.still_ready.connect(self._on_canon_still)
             self.camera.capture_failed.connect(self._on_canon_capture_failed)
             self.camera.camera_lost.connect(self._on_canon_lost)
+        self._cam_frame_seen = False
         self.camera.start()
-        QTimer.singleShot(0, self._fit_capture_layout)
+        LOG.info("[CAMERA] opened for new session")
+
+    def _release_camera(self):
+        """Stop the camera thread so it closes its session (EDSDK
+        CloseSession + TerminateSDK / cv2 release). Non-blocking: the thread
+        finishes in the background; _create_camera waits for it if needed."""
+        cam = self.camera
+        if cam is None:
+            return
+        self.camera = None
+        self._warm_token += 1
+        self._cam_warming = False
+        for sig in ("frame_ready", "still_ready", "capture_failed", "camera_lost"):
+            try:
+                getattr(cam, sig).disconnect()
+            except Exception:
+                pass
+        cam.running = False
+        self._old_cameras = [c for c in getattr(self, "_old_cameras", []) if c.isRunning()]
+        self._old_cameras.append(cam)
+        LOG.info("[CAMERA] released (session ended)")
+
+    def _wait_old_cameras(self, timeout_ms=15000):
+        for c in getattr(self, "_old_cameras", []):
+            if c.isRunning() and not c.wait(timeout_ms):
+                LOG.warning("[CAMERA] previous camera thread still running")
+        # Keep refs to any still-running thread: destroying a running QThread crashes.
+        self._old_cameras = [c for c in getattr(self, "_old_cameras", []) if c.isRunning()]
 
     def _ui(self, fn):
         """Run fn on the UI thread; safe to call from worker threads."""
@@ -2913,7 +2960,9 @@ class MainWindow(QMainWindow):
     def _update_preview(self, frame, raw_frame, is_cropped):
         self.last_raw_frame = frame
         self._last_uncropped_frame = raw_frame
-        if self.session_started and not self.is_reviewing and not self.is_reviewing_final:
+        self._cam_frame_seen = True
+        if (self.session_started and not self._cam_warming
+                and not self.is_reviewing and not self.is_reviewing_final):
             now = time.perf_counter()
             min_dt = 1.0 / max(self.video_fps, 1)
             if now - self._last_record_ts >= min_dt:
@@ -3310,6 +3359,9 @@ class MainWindow(QMainWindow):
         self.captured_frames = []
         self.current_step = 1
         self.session_started = True
+        self._release_camera()       # never reuse a handle from an earlier session
+        self._wait_old_cameras()
+        self._create_camera()
         self.camera.crop = True
         self.current_filter = "none"
         self.bts_buffer = []
@@ -3327,7 +3379,41 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(self.SCREEN_CAPTURE)
         self._rec_blink_timer.start()
         QTimer.singleShot(0, self._fit_capture_layout)
-        QTimer.singleShot(50, self._start_capture_cycle)
+        self._start_camera_warmup()
+
+    def _start_camera_warmup(self):
+        """Give the camera time to start before the first shot's countdown."""
+        self._warm_token += 1
+        token = self._warm_token
+        self._cam_warming = True
+        self.current_count = max(0, int(CONFIG.get("camera_warmup_seconds", 5)))
+        self._warm_deadline = time.time() + self.current_count + 15
+        self.ready_banner.setText("\u273f  Menyiapkan kamera\u2026  \u273f")
+        self.ready_banner.show()
+        self.ready_banner.raise_()
+        self.countdown_label.show()
+        self.countdown_label.raise_()
+        self._warmup_tick(token)
+
+    def _warmup_tick(self, token):
+        if token != self._warm_token or not self.session_started:
+            return
+        if self.current_count > 0:
+            self.countdown_label.setText(str(self.current_count))
+            self.current_count -= 1
+            QTimer.singleShot(1000, lambda: self._warmup_tick(token))
+            return
+        # Timer done; if the camera hasn't produced a frame yet, wait a bit
+        # longer (up to 15s) rather than shooting into a dead camera.
+        if not self._cam_frame_seen and time.time() < self._warm_deadline:
+            self.countdown_label.setText("\u2026")
+            QTimer.singleShot(250, lambda: self._warmup_tick(token))
+            return
+        if not self._cam_frame_seen:
+            LOG.warning("[CAMERA] no live frame after warm-up; starting anyway")
+        self._cam_warming = False
+        self.ready_banner.setText("\u273f  Siap-siap ya!  \u273f")
+        self._start_capture_cycle()
 
     def _reset_slots(self):
         for i, slot in enumerate(self.slot_widgets):
@@ -4037,6 +4123,7 @@ class MainWindow(QMainWindow):
             self._reset_to_home()
             return
 
+        self._release_camera()   # end the camera session; next session reopens it
         self.stack.setCurrentIndex(self.SCREEN_PRINT)
         self.print_progress.setValue(0)
         self.print_pct.setText("0%")
@@ -4436,8 +4523,7 @@ class MainWindow(QMainWindow):
         self.session_started = False
         self.temp_canvas = None
         self.captured_frames = []
-        if hasattr(self, "camera"):
-            self.camera.crop = False
+        self._release_camera()
         self.bts_buffer = []
         self.rolling_buffer = []
         self.moving_clips = [None] * self.shots_per_session
@@ -4457,8 +4543,8 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(self.SCREEN_HOME)
 
     def closeEvent(self, event):
-        if hasattr(self, "camera"):
-            self.camera.stop()
+        self._release_camera()
+        self._wait_old_cameras()
         event.accept()
 
     def keyPressEvent(self, event):
