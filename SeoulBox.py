@@ -30,7 +30,7 @@ from PIL import Image
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
-    QStackedWidget, QFrame, QProgressBar, QGraphicsDropShadowEffect
+    QStackedWidget, QFrame, QProgressBar, QGraphicsDropShadowEffect, QScroller
 )
 from PyQt5.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QSize, QUrl, QByteArray, QPointF, QRectF
@@ -1571,6 +1571,9 @@ class MainWindow(QMainWindow):
         self.all_shots            = []   # every shot this session (kept + bonus)
         self.all_clips            = []
         self.picked_indices       = []   # all_shots index per layout pose
+        self.pick_pool            = []   # picked all_shots indices, frame order first
+        self._fp_sel              = None # frame-picker slot tapped for a swap
+        self._fp_thumb_cache      = {}
         self.extra_prints         = 0
         self._slot_rect_cache     = {}
         self.current_filter   = "none"
@@ -2233,17 +2236,51 @@ class MainWindow(QMainWindow):
         sub.setAlignment(Qt.AlignCenter)
         sub.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 20px; font-weight: 500; background: transparent;")
         self._fp_sub = sub
+        # Left column: every picked photo, frame slots first then spares.
+        # Tap one then another to swap them (re-orders the frame).
+        self.fp_slot_hint = QLabel("Ketuk 2 foto untuk tukar posisi", screen)
+        self.fp_slot_hint.setAlignment(Qt.AlignCenter)
+        self.fp_slot_hint.setStyleSheet(
+            f"color: {COLORS['ink_soft']}; font-size: 15px; font-weight: 700; background: transparent;")
+        self.fp_slot_scroll = QScrollArea(screen)
+        self.fp_slot_scroll.setWidgetResizable(False)
+        self.fp_slot_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.fp_slot_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.fp_slot_scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollBar:vertical { width: 8px; background: #FFE1EC; border-radius: 4px; }"
+            "QScrollBar::handle:vertical { background: #FF9CC0; border-radius: 4px; min-height: 30px; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        )
+        self.fp_slot_host = QWidget()
+        self.fp_slot_host.setStyleSheet("background: transparent;")
+        self.fp_slot_scroll.setWidget(self.fp_slot_host)
+        QScroller.grabGesture(self.fp_slot_scroll.viewport(), QScroller.LeftMouseButtonGesture)
         self.fp_slot_widgets = []
         for i in range(MAX_SLOTS):
-            slot = QLabel(screen)
-            slot.setStyleSheet("background: white; border: 2px solid white; border-radius: 14px;")
-            slot.setAlignment(Qt.AlignCenter)
+            slot = QPushButton(self.fp_slot_host)
+            slot.setCursor(Qt.PointingHandCursor)
+            slot.setStyleSheet(self._fp_slot_style("frame"))
+            slot.clicked.connect(partial(self._on_fp_slot_clicked, i))
             ph = QLabel(f"{i+1}", slot)
             ph.setAlignment(Qt.AlignCenter)
-            ph.setStyleSheet(f"color: {COLORS['pink']}; font-size: 26px; font-weight: 800; font-family: '{FONT_DISPLAY}'; background: transparent;")
+            ph.setAttribute(Qt.WA_TransparentForMouseEvents)
+            ph.setStyleSheet(f"color: {COLORS['pink']}; font-size: 26px; font-weight: 800; font-family: '{FONT_DISPLAY}'; background: transparent; border: none;")
             slot.placeholder_text = ph
             slot.image_label = None
-            self._add_shadow(slot, blur=18, y_offset=4, alpha=80)
+            badge = QLabel("", slot)
+            badge.setAlignment(Qt.AlignCenter)
+            badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+            slot.badge = badge
+            ring = QLabel(slot)
+            ring.setAttribute(Qt.WA_TransparentForMouseEvents)
+            ring.setStyleSheet(f"background: transparent; border: 6px solid {COLORS['yellow']}; "
+                               f"border-radius: 14px;")
+            ring.hide()
+            slot.sel_ring = ring
+            self._add_shadow(slot, blur=14, y_offset=3, alpha=80)
+            slot.hide()
             self.fp_slot_widgets.append(slot)
         self.fp_preview_container = QWidget(screen)
         self.fp_preview_container.setStyleSheet("background: transparent;")
@@ -2994,39 +3031,125 @@ class MainWindow(QMainWindow):
         if self.stack.currentIndex() == self.SCREEN_FRAMES:
             self._render_fp_preview()
 
+    def _fp_items(self):
+        """Photos for the frame-picker column, in order: the first
+        shots_per_session go into the frame, the rest are spares."""
+        if self.pick_pool and self.all_shots:
+            return [self.all_shots[i] for i in self.pick_pool if 0 <= i < len(self.all_shots)]
+        return list(self.captured_frames)
+
+    def _apply_pool_order(self):
+        """Derive the frame's photos/clips from pick_pool (frame order first)."""
+        N = self.shots_per_session
+        pool = list(self.pick_pool)
+        self.picked_indices = pool
+        self.captured_frames = [self.all_shots[i] for i in pool[:N]]
+        self.moving_clips = [self.all_clips[i] if i < len(self.all_clips) else None
+                             for i in pool[:N]]
+
+    @staticmethod
+    def _fp_slot_style(kind):
+        border = "white" if kind == "frame" else "transparent"
+        bg = "rgba(255,255,255,0.75)" if kind == "spare" else "white"
+        return (f"QPushButton {{ background: {bg}; border: 2px solid {border}; "
+                f"border-radius: 14px; }} QPushButton:hover {{ border-color: #FFC2D8; }}")
+
+    def _style_fp_slots(self):
+        N = self.shots_per_session
+        sel = getattr(self, "_fp_sel", None)
+        for idx, slot in enumerate(self.fp_slot_widgets):
+            if not slot.isVisible():
+                continue
+            kind = "frame" if idx < N else "spare"
+            slot.setStyleSheet(self._fp_slot_style(kind))
+            slot.sel_ring.setGeometry(0, 0, slot.width(), slot.height())
+            slot.sel_ring.setVisible(idx == sel)
+            slot.sel_ring.raise_()
+            b = slot.badge
+            if idx < N:
+                b.setText(str(idx + 1))
+                b.setStyleSheet(f"background: {COLORS['pink']}; color: white; font-size: 16px; "
+                                f"font-weight: 900; border-radius: 15px; border: 2px solid white;")
+                b.resize(30, 30)
+            else:
+                b.setText("cadangan")
+                b.setStyleSheet(f"background: white; color: {COLORS['ink_soft']}; font-size: 12px; "
+                                f"font-weight: 800; border-radius: 11px; border: 1px solid {COLORS['pink_soft']};")
+                b.resize(84, 22)
+            b.move(6, 6)
+            b.raise_()
+
+    def _on_fp_slot_clicked(self, idx):
+        items = self._fp_items()
+        if idx >= len(items) or not self.pick_pool:
+            return
+        sel = self._fp_sel
+        if sel is None:
+            self._fp_sel = idx
+            self._style_fp_slots()
+            return
+        self._fp_sel = None
+        if sel != idx and sel < len(self.pick_pool):
+            p = self.pick_pool
+            p[sel], p[idx] = p[idx], p[sel]
+            self._apply_pool_order()
+            LOG.info(f"[FRAME] reorder -> {[i + 1 for i in p]}")
+            self._populate_fp_slots()
+            N = self.shots_per_session
+            if sel < N or idx < N:
+                self._render_fp_preview()
+        self._style_fp_slots()
+
+    def _fp_thumb(self, shot_key, frame, w, h):
+        flt = getattr(self, "current_filter", "none")
+        key = (shot_key, flt, w, h)
+        pix = self._fp_thumb_cache.get(key)
+        if pix is not None:
+            return pix
+        # Downscale before beautify/filter: thumbnails don't need full res.
+        fh, fw = frame.shape[:2]
+        sc = min(1.0, 2.0 * max(w / max(1, fw), h / max(1, fh)))
+        src = frame
+        if sc < 1.0:
+            src = cv2.resize(frame, (max(1, int(fw * sc)), max(1, int(fh * sc))),
+                             interpolation=cv2.INTER_AREA)
+        bty = float(CONFIG.get("beautify_strength", 0.0))
+        if bty > 0:
+            src = beautify(src, bty)
+        if flt and flt != "none":
+            src = apply_filter(src, flt)
+        rgb = np.ascontiguousarray(cv2.cvtColor(src, cv2.COLOR_BGR2RGB))
+        qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
+        pix = QPixmap.fromImage(qimg).scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        if pix.width() > w or pix.height() > h:
+            pix = pix.copy((pix.width() - w) // 2, (pix.height() - h) // 2, w, h)
+        self._fp_thumb_cache[key] = pix
+        return pix
+
     def _populate_fp_slots(self):
+        items = self._fp_items()
+        keys = list(self.pick_pool) if (self.pick_pool and self.all_shots) else \
+            [f"c{i}" for i in range(len(items))]
         for idx, slot in enumerate(self.fp_slot_widgets):
             if slot.image_label is not None:
                 slot.image_label.deleteLater()
                 slot.image_label = None
-            if idx < len(self.captured_frames):
+            if idx < len(items):
                 slot.placeholder_text.hide()
-                slot.setStyleSheet("background: white; border: 2px solid white; border-radius: 14px;")
                 sw_s = max(slot.width() - 4, 10)
                 sh_s = max(slot.height() - 4, 10)
                 if sw_s < 20 or sh_s < 20:
                     continue
-                rgb_src = self.captured_frames[idx]
-                bty = float(CONFIG.get("beautify_strength", 0.0))
-                if bty > 0:
-                    rgb_src = beautify(rgb_src, bty)
-                flt = getattr(self, "current_filter", "none")
-                if flt and flt != "none":
-                    rgb_src = apply_filter(rgb_src, flt)
-                rgb = cv2.cvtColor(rgb_src, cv2.COLOR_BGR2RGB)
-                qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
-                pix = QPixmap.fromImage(qimg).scaled(sw_s, sh_s, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-                if pix.width() > sw_s or pix.height() > sh_s:
-                    cx = (pix.width() - sw_s) // 2
-                    cy = (pix.height() - sh_s) // 2
-                    pix = pix.copy(cx, cy, sw_s, sh_s)
+                pix = self._fp_thumb(keys[idx], items[idx], sw_s, sh_s)
                 img_lbl = QLabel(slot)
                 img_lbl.setAlignment(Qt.AlignCenter)
-                img_lbl.setStyleSheet("background: transparent; border-radius: 12px;")
+                img_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+                img_lbl.setStyleSheet("background: transparent; border: none; border-radius: 12px;")
                 img_lbl.setPixmap(pix)
                 img_lbl.setGeometry(2, 2, sw_s, sh_s)
                 img_lbl.show()
                 slot.image_label = img_lbl
+        self._style_fp_slots()
 
     def _render_fp_preview(self):
         try:
@@ -3117,26 +3240,48 @@ class MainWindow(QMainWindow):
         pc_y = top_y + (avail_h - pc_h) // 2
         self.fp_preview_container.setGeometry(pc_x, pc_y, pc_w, pc_h)
         N = max(1, min(MAX_SLOTS, self.shots_per_session))
+        items = self._fp_items()
+        P = max(N, min(MAX_SLOTS, len(items)))
         side_margin = 32
         slot_gap_y = 14
+        pad = 12   # room for the drop shadows inside the scroll area
         l_area_x = side_margin
         l_area_w = pc_x - 30 - l_area_x
+        hint_h = 32
+        col_y = pc_y + hint_h
+        col_h = pc_h - hint_h
+        self.fp_slot_hint.setGeometry(l_area_x, pc_y, l_area_w, hint_h - 4)
+        self.fp_slot_hint.setVisible(len(items) > 1)
         slot_w_cap = 300
-        max_l_slot_w = min(slot_w_cap, max(140, l_area_w))
-        avail_col_h = pc_h
-        max_slot_h = (avail_col_h - slot_gap_y * (N - 1)) // max(1, N)
-        max_aspect = max((self.pose_aspects[i] for i in range(N)), default=3/4)
+        max_l_slot_w = min(slot_w_cap, max(140, l_area_w - 2 * pad - 10))
+
+        def _aspect(i):
+            if i < N:
+                return self.pose_aspects[i] if i < len(self.pose_aspects) else 3 / 4
+            if i < len(items):
+                fh, fw = items[i].shape[:2]
+                return fw / max(1, fh)
+            return 3 / 4
+        # Size so the N frame slots fit without scrolling; spares scroll.
+        max_slot_h = (col_h - 2 * pad - slot_gap_y * (N - 1)) // max(1, N)
+        max_aspect = max((_aspect(i) for i in range(N)), default=3/4)
         h_from_w = int(max_l_slot_w / max(0.1, max_aspect))
         slot_h = max(72, min(max_slot_h, h_from_w))
         for s in self.fp_slot_widgets:
             s.setVisible(False)
-        stack_h = N * slot_h + (N - 1) * slot_gap_y
-        y_start = pc_y + (pc_h - stack_h) // 2
-        for i in range(N):
-            a = self.pose_aspects[i] if i < len(self.pose_aspects) else 3/4
-            w_for_this = max(40, int(round(slot_h * a)))
+        stack_h = P * slot_h + (P - 1) * slot_gap_y + 2 * pad
+        widest = max(min(max_l_slot_w, max(40, int(round(slot_h * _aspect(i)))))
+                     for i in range(P))
+        bar_w = 14 if stack_h > col_h else 0
+        host_w = widest + 2 * pad
+        col_w = min(l_area_w, host_w + bar_w)
+        self.fp_slot_scroll.setGeometry(l_area_x + (l_area_w - col_w) // 2, col_y, col_w, col_h)
+        self.fp_slot_host.resize(host_w, max(stack_h, col_h))
+        y_start = pad + max(0, (col_h - stack_h) // 2)
+        for i in range(P):
+            w_for_this = max(40, int(round(slot_h * _aspect(i))))
             w_for_this = min(w_for_this, max_l_slot_w)
-            x = l_area_x + (l_area_w - w_for_this) // 2
+            x = (host_w - w_for_this) // 2
             self.fp_slot_widgets[i].setGeometry(
                 x, y_start + i * (slot_h + slot_gap_y), w_for_this, slot_h)
             self.fp_slot_widgets[i].setVisible(True)
@@ -3159,6 +3304,7 @@ class MainWindow(QMainWindow):
         self.all_shots = []
         self.all_clips = []
         self.picked_indices = []
+        self.pick_pool = []
         self.extra_prints = 0
         self._refresh_extra_card()
         self.captured_frames = []
@@ -3386,11 +3532,15 @@ class MainWindow(QMainWindow):
             if len(self.all_shots) > self.shots_per_session:
                 self._goto_pick_screen()
             else:
-                self.picked_indices = list(range(len(self.all_shots)))
+                self.pick_pool = list(range(len(self.all_shots)))
+                self._apply_pool_order()
                 self._goto_frame_picker()
 
     def _goto_frame_picker(self):
         self.current_filter = "none"
+        self._fp_sel = None
+        self._fp_thumb_cache = {}
+        self.fp_slot_scroll.verticalScrollBar().setValue(0)
         if hasattr(self, "filter_cards"):
             for k, btn in self.filter_cards.items():
                 self._style_filter_card(btn, selected=(k == "none"))
@@ -3421,6 +3571,21 @@ class MainWindow(QMainWindow):
         self._pick_counter.setStyleSheet(
             f"color: {COLORS['pink_dk']}; background: white; border: 2px solid {COLORS['pink_soft']}; "
             f"border-radius: 22px; font-size: 18px; font-weight: 800;")
+        self.pick_scroll = QScrollArea(screen)
+        self.pick_scroll.setWidgetResizable(False)
+        self.pick_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.pick_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.pick_scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollBar:vertical { width: 12px; background: #FFE1EC; border-radius: 6px; }"
+            "QScrollBar::handle:vertical { background: #FF9CC0; border-radius: 6px; min-height: 40px; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        )
+        self.pick_host = QWidget()
+        self.pick_host.setStyleSheet("background: transparent;")
+        self.pick_scroll.setWidget(self.pick_host)
+        QScroller.grabGesture(self.pick_scroll.viewport(), QScroller.LeftMouseButtonGesture)
         self.pick_cards = []
         self._pick_order = []
         self._pick_pix = []
@@ -3451,12 +3616,21 @@ class MainWindow(QMainWindow):
         return ("QPushButton { background: rgba(255,255,255,0.92); border: 5px solid transparent; "
                 "border-radius: 18px; } QPushButton:hover { border-color: #FFC2D8; }")
 
+    def _pick_max(self):
+        """Most photos the user may keep: layout poses + bonus shots."""
+        N = self.shots_per_session
+        return min(len(self.all_shots), N + max(0, int(getattr(self, "extra_shots", 0) or 0)))
+
     def _goto_pick_screen(self):
         N = self.shots_per_session
+        M = self._pick_max()
         self._pick_order = list(range(min(N, len(self.all_shots))))
         self._populate_pick_grid()
+        rng = f"{N}" if M <= N else f"{N}\u2013{M}"
         self._pick_sub.setText(
-            f"Pilih {N} dari {len(self.all_shots)} foto  \u00b7  urutan pilihanmu = urutan di frame")
+            f"Pilih {rng} dari {len(self.all_shots)} foto  \u00b7  "
+            f"{N} pertama masuk frame, urutan bisa diatur lagi nanti")
+        self.pick_scroll.verticalScrollBar().setValue(0)
         self.stack.setCurrentIndex(self.SCREEN_PICK)
         QTimer.singleShot(0, self._fit_pick_layout)
 
@@ -3477,7 +3651,7 @@ class MainWindow(QMainWindow):
             qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0],
                           QImage.Format_RGB888).copy()
             self._pick_pix.append(QPixmap.fromImage(qimg))
-            card = QPushButton(self.pick_screen)
+            card = QPushButton(self.pick_host)
             card.setCursor(Qt.PointingHandCursor)
             card.clicked.connect(partial(self._on_pick_card, i))
             img = QLabel(card)
@@ -3508,46 +3682,46 @@ class MainWindow(QMainWindow):
             return
         self._pick_title.setGeometry(0, 30, sw, 68)
         self._pick_sub.setGeometry(0, 100, sw, 30)
-        cnt_w = 240
+        cnt_w = 380
         self._pick_counter.setGeometry((sw - cnt_w) // 2, 140, cnt_w, 44)
         nav_h, bottom = 68, 30
         nav_y = sh - nav_h - bottom
-        self.btn_pick_reset.setFixedSize(240, nav_h)
-        self.btn_pick_next.setFixedSize(280, nav_h)
+        self.btn_pick_reset.resize(240, nav_h)
+        self.btn_pick_next.resize(280, nav_h)
         self.btn_pick_reset.move(sw // 2 - 240 - 14, nav_y)
         self.btn_pick_next.move(sw // 2 + 14, nav_y)
         n = len(self.pick_cards)
         if n == 0:
             return
-        top = 204
-        avail_h = nav_y - top - 22
-        avail_w = sw - 120
+        top = 200
+        view_h = nav_y - top - 16
+        self.pick_scroll.setGeometry(40, top, sw - 80, view_h)
+        bar_w = 16
+        avail_w = sw - 80 - bar_w
         f0 = self.all_shots[0]
         aspect = f0.shape[1] / max(1, f0.shape[0])
-        gap, pad, cap_h = 26, 14, 46
-        best = None
-        for rows in (1, 2, 3):
-            cols = -(-n // rows)
-            cw = (avail_w - gap * (cols - 1)) / cols
-            ch = (avail_h - gap * (rows - 1)) / rows
-            pw = min(cw - 2 * pad, (ch - pad - cap_h) * aspect)
-            if pw <= 20:
-                continue
-            if best is None or pw > best[2]:
-                best = (rows, cols, pw)
-        if best is None:
+        gap, pad, cap_h, margin = 26, 14, 46, 18
+        # Big cards in a fixed column count; extra rows scroll vertically.
+        # A card is capped a bit shorter than the viewport so the next row
+        # peeks in and hints that the list scrolls.
+        cols = min(n, 3 if n <= 6 else 4)
+        rows = -(-n // cols)
+        cw = (avail_w - 2 * margin - gap * (cols - 1)) / cols
+        max_card_h = view_h - 2 * margin - (60 if rows > 1 else 0)
+        pw = min(cw - 2 * pad, (max_card_h - pad - cap_h) * aspect)
+        if pw <= 20:
             return
-        rows, cols, pw = best
         pw = int(pw)
         ph = int(pw / aspect)
         card_w, card_h = pw + 2 * pad, ph + pad + cap_h
-        grid_h = rows * card_h + (rows - 1) * gap
-        y0 = top + max(0, (avail_h - grid_h) // 2)
+        grid_h = rows * card_h + (rows - 1) * gap + 2 * margin
+        self.pick_host.resize(avail_w, max(grid_h, view_h))
+        y0 = margin + max(0, (view_h - grid_h) // 2)
         for i, card in enumerate(self.pick_cards):
             r, c = divmod(i, cols)
             in_row = min(cols, n - r * cols)
             row_w = in_row * card_w + (in_row - 1) * gap
-            x = (sw - row_w) // 2 + c * (card_w + gap)
+            x = (avail_w - row_w) // 2 + c * (card_w + gap)
             y = y0 + r * (card_h + gap)
             card.setGeometry(x, y, card_w, card_h)
             pix = self._pick_pix[i].scaled(pw, ph, Qt.KeepAspectRatioByExpanding,
@@ -3583,8 +3757,10 @@ class MainWindow(QMainWindow):
             if on is not None:
                 card.img_label.setPixmap(on if sel else card.pix_off)
         k = len(self._pick_order)
-        self._pick_counter.setText(f"\u2661  {k} / {N} dipilih")
-        ready = (k == N)
+        M = self._pick_max()
+        extra = f"  (maks {M})" if M > N else ""
+        self._pick_counter.setText(f"\u2661  {k} dipilih  \u00b7  min {N}{extra}")
+        ready = (N <= k <= M)
         self.btn_pick_next.setEnabled(ready)
         if ready:
             self.btn_pick_next.setStyleSheet(f"""
@@ -3603,10 +3779,10 @@ class MainWindow(QMainWindow):
             """)
 
     def _on_pick_card(self, i):
-        N = self.shots_per_session
+        M = self._pick_max()
         if i in self._pick_order:
             self._pick_order.remove(i)
-        elif len(self._pick_order) < N:
+        elif len(self._pick_order) < M:
             self._pick_order.append(i)
         else:
             # Already full: swap out the most recent pick so a tap always
@@ -3619,14 +3795,11 @@ class MainWindow(QMainWindow):
         self._refresh_pick_cards()
 
     def _confirm_pick(self):
-        if len(self._pick_order) != self.shots_per_session:
+        if not (self.shots_per_session <= len(self._pick_order) <= self._pick_max()):
             return
-        order = list(self._pick_order)
-        self.picked_indices = order
-        self.captured_frames = [self.all_shots[i] for i in order]
-        self.moving_clips = [self.all_clips[i] if i < len(self.all_clips) else None
-                             for i in order]
-        LOG.info(f"[PICK] kept shots {[i + 1 for i in order]} of {len(self.all_shots)}")
+        self.pick_pool = list(self._pick_order)
+        self._apply_pool_order()
+        LOG.info(f"[PICK] kept shots {[i + 1 for i in self.pick_pool]} of {len(self.all_shots)}")
         self._goto_frame_picker()
 
     def _update_captured_previews(self):
@@ -3886,6 +4059,7 @@ class MainWindow(QMainWindow):
         self._pending_upload_reason = None
         self._pending_all_shots = list(self.all_shots or self.captured_frames)
         self._pending_picked = list(self.picked_indices or range(len(self._pending_all_shots)))
+        self._pending_frame_n = self.shots_per_session
         self._pending_filter = getattr(self, "current_filter", "none")
         self._pending_copies = 1 + max(0, int(getattr(self, "extra_prints", 0) or 0))
 
@@ -4031,6 +4205,7 @@ class MainWindow(QMainWindow):
             job["done"].set()
             return job
         picked = list(getattr(self, "_pending_picked", []) or [])
+        frame_n = int(getattr(self, "_pending_frame_n", len(picked)) or len(picked))
         styled = bool(icfg.get("apply_filter", True))
         flt = getattr(self, "_pending_filter", "none") if styled else "none"
         bty = float(CONFIG.get("beautify_strength", 0.0)) if styled else 0.0
@@ -4046,7 +4221,8 @@ class MainWindow(QMainWindow):
                         img = apply_filter(img, flt)
                         name = f"foto_{i + 1:02d}"
                         if i in picked:
-                            name += f"_dipilih-{picked.index(i) + 1}"
+                            rank = picked.index(i)
+                            name += (f"_dipilih-{rank + 1}" if rank < frame_n else "_favorit")
                         name += ".jpg"
                         ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
                         if not ok:
@@ -4269,6 +4445,7 @@ class MainWindow(QMainWindow):
         self.all_shots = []
         self.all_clips = []
         self.picked_indices = []
+        self.pick_pool = []
         self.extra_prints = 0
         if self.print_timer.isActive():
             self.print_timer.stop()
