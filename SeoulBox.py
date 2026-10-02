@@ -768,6 +768,9 @@ class CameraThread(QThread):
         self.wait()
 
 
+SLOT_ALPHA_MAX = 128   # overlay alpha below this = photo hole
+
+
 def fallback_slot_rects(ow, oh, n):
     n = max(1, n)
     if n == 1: cols = 1
@@ -1534,9 +1537,13 @@ class BackgroundSaverThread(QThread):
         out_h = int(round(oh * (out_w / ow)))
         if out_w % 2: out_w -= 1
         if out_h % 2: out_h -= 1
+        ov = np.array(overlay)
+        alpha_arr = ov[:, :, 3]
+        has_transparent_slots = bool((alpha_arr < SLOT_ALPHA_MAX).any())
+        if has_transparent_slots:   # clear half-opaque holes (see _build_final_canvas)
+            ov[:, :, 3] = np.where(alpha_arr < SLOT_ALPHA_MAX, 0, alpha_arr)
+            overlay = Image.fromarray(ov, "RGBA")
         overlay_small = overlay.resize((out_w, out_h), Image.BILINEAR)
-        alpha_arr = np.array(overlay)[:, :, 3]
-        has_transparent_slots = bool((alpha_arr == 0).any())
         sx = out_w / ow
         sy = out_h / oh
         scaled_rects = []
@@ -2170,7 +2177,7 @@ class MainWindow(QMainWindow):
             return
         slot_to_pose = self._slot_to_pose_mapping()
         slot_count = len(slot_to_pose) if slot_to_pose else N
-        rects = self._detect_slot_rects(overlay, target_count=slot_count)
+        rects = self._detect_slot_rects(overlay, target_count=slot_count, path=first_frame)
         if rects is None:
             return
         for pose_idx in range(N):
@@ -4054,21 +4061,25 @@ class MainWindow(QMainWindow):
                 slot.placeholder_text.setText(f"{idx+1}")
                 slot.placeholder_text.show()
 
-    def _detect_slot_rects(self, overlay_pil, target_count=None):
+    def _detect_slot_rects(self, overlay_pil, target_count=None, path=None):
         if target_count is None:
             target_count = self.shots_per_session
         try:
             order_key = (self.current_layout or {}).get("slot_order") or CONFIG.get("slot_order", "legacy")
         except Exception:
             order_key = CONFIG.get("slot_order", "legacy")
-        path_key = f"{self.overlay_path}|{target_count}|{order_key}" if self.overlay_path else f"|{target_count}|{order_key}"
+        # Cache by the frame actually measured (not whichever frame is selected).
+        src = path or self.overlay_path or ""
+        path_key = f"{src}|{target_count}|{order_key}"
         if path_key in self._slot_rect_cache:
             return self._slot_rect_cache[path_key]
         arr = np.array(overlay_pil)
         h, w = arr.shape[:2]
         alpha = arr[:, :, 3]
         rgb = arr[:, :, :3]
-        transparent_mask = (alpha == 0)
+        # Photo holes: mostly transparent (alpha < 128). Frames exported from
+        # Canva/Photoshop often leave holes slightly opaque instead of 0.
+        transparent_mask = (alpha < SLOT_ALPHA_MAX)
         if transparent_mask.any():
             slot_mask = transparent_mask
         else:
@@ -4090,7 +4101,7 @@ class MainWindow(QMainWindow):
             if cw > 0.95 * w and ch > 0.95 * h: continue
             candidates.append((x, y, cw, ch, area))
         candidates.sort(key=lambda r: r[4], reverse=True)
-        fname = Path(str(self.overlay_path or "")).name
+        fname = Path(str(src)).name
         if len(candidates) < target_count:
             if not candidates:
                 self._slot_rect_cache[path_key] = None
@@ -4190,11 +4201,19 @@ class MainWindow(QMainWindow):
         ow, oh = overlay.size
         slot_to_pose = self._slot_to_pose_mapping()
         slot_count = len(slot_to_pose) if slot_to_pose else self.shots_per_session
-        rects = self._detect_slot_rects(overlay, target_count=slot_count)
+        rects = self._detect_slot_rects(overlay, target_count=slot_count, path=self.overlay_path)
         if rects is None:
+            LOG.warning(f"[FRAME] {Path(str(self.overlay_path)).name}: no photo holes "
+                        f"found - using a plain grid")
             rects = fallback_slot_rects(ow, oh, slot_count)
-        alpha_arr = np.array(overlay)[:, :, 3]
-        has_transparent_slots = bool((alpha_arr == 0).any())
+        ov = np.array(overlay)
+        alpha_arr = ov[:, :, 3]
+        has_transparent_slots = bool((alpha_arr < SLOT_ALPHA_MAX).any())
+        if has_transparent_slots:
+            # Make the holes fully clear so a half-opaque hole can't wash the
+            # photo out with white; anti-aliased edges (alpha >= 128) stay.
+            ov[:, :, 3] = np.where(alpha_arr < SLOT_ALPHA_MAX, 0, alpha_arr)
+            overlay = Image.fromarray(ov, "RGBA")
         slot_pose_pairs = []
         for slot_idx, rect in enumerate(rects):
             if slot_to_pose:
@@ -4590,7 +4609,7 @@ class MainWindow(QMainWindow):
         if self.overlay_path:
             try:
                 ov = Image.open(self.overlay_path).convert("RGBA")
-                slot_rects = self._detect_slot_rects(ov, target_count=slot_count)
+                slot_rects = self._detect_slot_rects(ov, target_count=slot_count, path=self.overlay_path)
             except Exception:
                 slot_rects = None
 
