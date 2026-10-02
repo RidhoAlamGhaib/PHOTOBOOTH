@@ -4670,9 +4670,44 @@ def _apply_ui_scaling(app):
     QLayout.setContentsMargins = _patched_setContentsMargins
 
 
+def _install_exit_camera_cleanup(app, win):
+    """Close the camera session cleanly on every way out of the app, like
+    test_canon.py's try/finally: normal quit, console window closed, Ctrl+C,
+    logoff/shutdown. A session left open keeps the Canon body busy
+    (EDS_ERR 0x81) until it is power-cycled."""
+    def _on_quit():
+        try:
+            win._release_camera()
+            win._wait_old_cameras()
+        except Exception as e:
+            LOG.warning(f"[EXIT] camera release failed: {e}")
+    app.aboutToQuit.connect(_on_quit)
+    if platform.system() != "Windows":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        HandlerRoutine = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+
+        def _console_handler(ctrl_type):
+            # Runs on its own thread; Windows allows a few seconds here.
+            LOG.info(f"[EXIT] console event {ctrl_type} - closing camera")
+            try:
+                from canon_edsdk import CanonCameraThread
+                CanonCameraThread.stop_all(timeout_ms=4000)
+            except Exception as e:
+                LOG.warning(f"[EXIT] canon stop failed: {e}")
+            return False   # continue with default handling (process exit)
+        win._console_handler_ref = HandlerRoutine(_console_handler)  # keep alive
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(win._console_handler_ref, True)
+    except Exception as e:
+        LOG.warning(f"[EXIT] console handler not installed: {e}")
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     _setup_fonts(app)
     _apply_ui_scaling(app)
     win = MainWindow()
+    _install_exit_camera_cleanup(app, win)
     sys.exit(app.exec_())

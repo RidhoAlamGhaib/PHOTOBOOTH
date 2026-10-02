@@ -129,6 +129,25 @@ class EdsError(RuntimeError):
         super().__init__(f"{func} failed: EDS_ERR 0x{code & 0xFFFFFFFF:08X}")
 
 
+def _co_initialize():
+    """CoInitializeEx(apartment) on the current thread (Windows only).
+    Returns True if CoUninitialize should be called later."""
+    if sys.platform != "win32":
+        return False
+    try:
+        hr = ctypes.windll.ole32.CoInitializeEx(None, 0x2)  # COINIT_APARTMENTTHREADED
+        return hr in (0, 1)   # S_OK / S_FALSE (already initialised)
+    except Exception:
+        return False
+
+
+def _co_uninitialize():
+    try:
+        ctypes.windll.ole32.CoUninitialize()
+    except Exception:
+        pass
+
+
 def _app_dir():
     """The folder the user sees: next to the .exe when frozen (PyInstaller),
     otherwise next to this file."""
@@ -549,8 +568,41 @@ if _HAVE_QT:
             with self._lock:
                 self._capture_requested = True
 
+        # Live threads, so a console-close / Ctrl+C handler can shut them down.
+        _live_threads = set()
+
+        @classmethod
+        def stop_all(cls, timeout_ms=4000):
+            """Stop every running Canon thread and wait for its clean close.
+            Safe to call from any thread (used on process exit)."""
+            for t in list(cls._live_threads):
+                t.running = False
+            for t in list(cls._live_threads):
+                t.wait(timeout_ms)
+
         def run(self):
+            # EDSDK on Windows needs COM on the thread that uses it. The main
+            # thread (test_canon.py) has it; a QThread does not.
+            com = _co_initialize()
+            type(self)._live_threads.add(self)
             cam = CanonCamera(dll_dir=self._dll_dir)
+            try:
+                self._run_session(cam)
+            except Exception as e:
+                LOG.error(f"[CANON] camera thread crashed: {e!r}")
+            finally:
+                # Same guarantee as test_canon.py: whatever happened, end the
+                # session (live view off, CloseSession, TerminateSDK).
+                try:
+                    cam.close()
+                except Exception as e:
+                    LOG.warning(f"[CANON] close error: {e}")
+                type(self)._live_threads.discard(self)
+                if com:
+                    _co_uninitialize()
+                LOG.info("[CANON] camera thread stopped")
+
+        def _run_session(self, cam):
             try:
                 cam.open()
                 cam.start_live_view()
@@ -596,12 +648,6 @@ if _HAVE_QT:
             if lost_reason:
                 LOG.error(f"[CANON] watchdog: {lost_reason} - stopping EDSDK")
                 self._shutdown_edsdk(cam, lost_reason)
-            else:
-                try:
-                    cam.close()
-                except Exception:
-                    pass
-            LOG.info("[CANON] camera thread stopped")
 
         def _shutdown_edsdk(self, cam, reason):
             """Close session + TerminateSDK so the camera is released, then
