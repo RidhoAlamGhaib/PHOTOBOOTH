@@ -446,7 +446,8 @@ class CanonCamera:
         if not self._live:
             return
         try:
-            self._set_prop_u32(kEdsPropID_Evf_OutputDevice, 0, busy_timeout=3.0)
+            self._set_prop_u32(kEdsPropID_Evf_OutputDevice, kEdsEvfOutputDevice_TFT,
+                               busy_timeout=3.0)   # back to camera screen
         except Exception as e:
             LOG.warning(f"[CANON] stop live view: {e}")
         self._live = False
@@ -552,24 +553,33 @@ class CanonCamera:
     def _send(self, command, param=0):
         return self._dll.EdsSendCommand(self._camera, command, param)
 
-    def _trigger_shutter(self, use_af=True):
-        """Prefer the press-shutter sequence (works well with live view AF);
-        fall back to the one-shot TakePicture command."""
-        if self._live and use_af:
-            try:
-                self._send(kEdsCameraCommand_DoEvfAf, 1)
-                time.sleep(0.2)
-            except Exception:
-                pass
-        completely = (kEdsCameraCommand_ShutterButton_Completely if use_af
-                      else kEdsCameraCommand_ShutterButton_Completely_NonAF)
-        code = self._send(kEdsCameraCommand_PressShutterButton, completely)
+    def _press(self, mode):
+        code = self._send(kEdsCameraCommand_PressShutterButton, mode) & 0xFFFFFFFF
         # Always release the button.
         self._send(kEdsCameraCommand_PressShutterButton,
                    kEdsCameraCommand_ShutterButton_OFF)
+        return code
+
+    def _trigger_shutter(self, use_af=True):
+        """Live-view AF, then full press. If AF can't lock (EDS_ERR 0x8D01),
+        shoot anyway without AF instead of losing the shot."""
+        if self._live and use_af:
+            try:
+                self._send(kEdsCameraCommand_DoEvfAf, 1)
+                time.sleep(0.4)
+                self._send(kEdsCameraCommand_DoEvfAf, 0)   # end AF, else body stays busy
+            except Exception:
+                pass
+        code = self._press(kEdsCameraCommand_ShutterButton_Completely if use_af
+                           else kEdsCameraCommand_ShutterButton_Completely_NonAF)
         if code == EDS_ERR_OK:
             return
-        LOG.warning(f"[CANON] PressShutterButton returned 0x{code & 0xFFFFFFFF:08X}; "
+        if use_af:
+            LOG.warning(f"[CANON] shutter (AF) returned 0x{code:08X}; retry without AF")
+            code = self._press(kEdsCameraCommand_ShutterButton_Completely_NonAF)
+            if code == EDS_ERR_OK:
+                return
+        LOG.warning(f"[CANON] PressShutterButton returned 0x{code:08X}; "
                     f"falling back to TakePicture")
         code = self._send(kEdsCameraCommand_TakePicture, 0)
         if code != EDS_ERR_OK:
