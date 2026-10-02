@@ -31,7 +31,7 @@ from effects import EFFECT_IDS, EFFECT_LABELS, apply_effect
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
-    QStackedWidget, QFrame, QProgressBar, QGraphicsDropShadowEffect, QScroller
+    QStackedWidget, QFrame, QProgressBar, QGraphicsDropShadowEffect, QScroller, QCheckBox
 )
 from PyQt5.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QSize, QUrl, QByteArray, QPointF, QRectF
@@ -1583,6 +1583,9 @@ class MainWindow(QMainWindow):
         self.all_clips            = []
         self.picked_indices       = []   # all_shots index per layout pose
         self.pick_pool            = []   # picked all_shots indices, frame order first
+        self.retake_shots         = []   # (frame, clip, step) of takes replaced by a retake
+        self.shot_labels          = []
+        self.kept_shot_idx        = []
         self._fp_sel              = None # frame-picker slot tapped for a swap
         self._fp_thumb_cache      = {}
         self.extra_prints         = 0
@@ -2466,6 +2469,19 @@ class MainWindow(QMainWindow):
         self.btn_extra_minus.clicked.connect(partial(self._change_extra_prints, -1))
         self.btn_extra_plus.clicked.connect(partial(self._change_extra_prints, 1))
         self.extra_card.hide()
+        # Customer choice: individual photos (soft files) get the filter too?
+        self.chk_indiv_fx = QCheckBox("Efek di foto satuan", screen)
+        self.chk_indiv_fx.setCursor(Qt.PointingHandCursor)
+        self.chk_indiv_fx.setAttribute(Qt.WA_StyledBackground, True)
+        self.chk_indiv_fx.setStyleSheet(f"""
+            QCheckBox {{ background: white; border: 2px solid {COLORS['pink_soft']};
+                         border-radius: 18px; padding: 0 14px; color: {COLORS['ink']};
+                         font-size: 16px; font-weight: 800; spacing: 12px; }}
+            QCheckBox::indicator {{ width: 28px; height: 28px; border-radius: 8px;
+                                    border: 2px solid {COLORS['pink']}; background: white; }}
+            QCheckBox::indicator:checked {{ background: {COLORS['pink']}; }}
+        """)
+        self._add_shadow(self.chk_indiv_fx, blur=18, y_offset=4, alpha=80)
         self.stack.addWidget(screen)
 
     def _max_extra_prints(self):
@@ -3272,6 +3288,11 @@ class MainWindow(QMainWindow):
         filter_x = sw - filter_w - 24
         filter_y = top_y
         filter_h = strip_y - filter_y - 16
+        if hasattr(self, "chk_indiv_fx"):
+            chk_h = 64
+            filter_h -= chk_h + 14
+            self.chk_indiv_fx.setGeometry(filter_x, filter_y + filter_h + 14, filter_w, chk_h)
+            self.chk_indiv_fx.raise_()
         if hasattr(self, "extra_card"):
             if self._max_extra_prints() > 0:
                 card_h = 176
@@ -3367,6 +3388,9 @@ class MainWindow(QMainWindow):
         self.all_clips = []
         self.picked_indices = []
         self.pick_pool = []
+        self.retake_shots = []
+        self.shot_labels = []
+        self.kept_shot_idx = []
         self.extra_prints = 0
         self._refresh_extra_card()
         self.captured_frames = []
@@ -3601,6 +3625,10 @@ class MainWindow(QMainWindow):
         self.retakes_used += 1
         self.review_widget.hide()
         self.is_reviewing = False
+        if self.current_frame_data is not None:
+            # Keep the rejected take: the pick screen shows every photo.
+            self.retake_shots.append((self.current_frame_data,
+                                      self._pending_moving_clip, self.current_step))
         self.current_frame_data = None
         self._pending_moving_clip = None
         self._start_capture_cycle()
@@ -3628,8 +3656,7 @@ class MainWindow(QMainWindow):
             self.is_reviewing_final = True
             self.camera.crop = False
             self._rec_blink_timer.stop()
-            self.all_shots = list(self.captured_frames)
-            self.all_clips = list(self.moving_clips)
+            self._collect_all_shots()
             if len(self.all_shots) > self.shots_per_session:
                 self._goto_pick_screen()
             else:
@@ -3637,8 +3664,28 @@ class MainWindow(QMainWindow):
                 self._apply_pool_order()
                 self._goto_frame_picker()
 
+    def _collect_all_shots(self):
+        """all_shots = every photo of the session in shooting order, retakes
+        included (each retake right before the take that replaced it)."""
+        N = self.shots_per_session
+        shots, clips, labels, kept = [], [], [], []
+        for i, frame in enumerate(self.captured_frames):
+            step = i + 1
+            tag = "   bonus" if step > N else ""
+            for k, (rf, rc, rs) in enumerate(r for r in self.retake_shots if r[2] == step):
+                shots.append(rf); clips.append(rc)
+                labels.append(f"#{step}  ulang {k + 1}{tag}")
+            kept.append(len(shots))
+            shots.append(frame)
+            clips.append(self.moving_clips[i] if i < len(self.moving_clips) else None)
+            labels.append(f"#{step}{tag}")
+        self.all_shots, self.all_clips = shots, clips
+        self.shot_labels, self.kept_shot_idx = labels, kept
+
     def _goto_frame_picker(self):
         self.current_filter = "none"
+        icfg = CONFIG.get("individual_photos", {}) or {}
+        self.chk_indiv_fx.setChecked(bool(icfg.get("apply_filter", True)))
         self._fp_sel = None
         self._fp_thumb_cache = {}
         self.fp_slot_scroll.verticalScrollBar().setValue(0)
@@ -3725,7 +3772,8 @@ class MainWindow(QMainWindow):
     def _goto_pick_screen(self):
         N = self.shots_per_session
         M = self._pick_max()
-        self._pick_order = list(range(min(N, len(self.all_shots))))
+        kept = list(getattr(self, "kept_shot_idx", []) or range(len(self.all_shots)))
+        self._pick_order = kept[:N]
         self._populate_pick_grid()
         rng = f"{N}" if M <= N else f"{N}\u2013{M}"
         self._pick_sub.setText(
@@ -3759,7 +3807,8 @@ class MainWindow(QMainWindow):
             img.setAlignment(Qt.AlignCenter)
             img.setAttribute(Qt.WA_TransparentForMouseEvents)
             img.setStyleSheet("background: transparent; border: none;")
-            cap = QLabel(f"#{i + 1}" + ("   bonus" if i >= N else ""), card)
+            labels = getattr(self, "shot_labels", None) or []
+            cap = QLabel(labels[i] if i < len(labels) else f"#{i + 1}", card)
             cap.setAlignment(Qt.AlignCenter)
             cap.setAttribute(Qt.WA_TransparentForMouseEvents)
             cap.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; font-weight: 800; "
@@ -4163,6 +4212,7 @@ class MainWindow(QMainWindow):
         self._pending_picked = list(self.picked_indices or range(len(self._pending_all_shots)))
         self._pending_frame_n = self.shots_per_session
         self._pending_filter = getattr(self, "current_filter", "none")
+        self._pending_indiv_fx = self.chk_indiv_fx.isChecked()
         self._pending_copies = 1 + max(0, int(getattr(self, "extra_prints", 0) or 0))
 
         # Run folder-prep in BG thread; when done, continue to print step.
@@ -4308,9 +4358,10 @@ class MainWindow(QMainWindow):
             return job
         picked = list(getattr(self, "_pending_picked", []) or [])
         frame_n = int(getattr(self, "_pending_frame_n", len(picked)) or len(picked))
-        styled = bool(icfg.get("apply_filter", True))
+        # Customer's checkbox on the frame screen (default: config apply_filter).
+        styled = bool(getattr(self, "_pending_indiv_fx", icfg.get("apply_filter", True)))
         flt = getattr(self, "_pending_filter", "none") if styled else "none"
-        bty = float(CONFIG.get("beautify_strength", 0.0)) if styled else 0.0
+        bty = float(CONFIG.get("beautify_strength", 0.0))
         quality = int(icfg.get("jpeg_quality", 95))
         out_dir = SAVE_DIR / f"SESSION_{ts}"
 
@@ -4547,6 +4598,9 @@ class MainWindow(QMainWindow):
         self.all_clips = []
         self.picked_indices = []
         self.pick_pool = []
+        self.retake_shots = []
+        self.shot_labels = []
+        self.kept_shot_idx = []
         self.extra_prints = 0
         if self.print_timer.isActive():
             self.print_timer.stop()
