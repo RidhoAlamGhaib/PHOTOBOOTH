@@ -903,12 +903,12 @@ def crop_center_to_aspect(img_bgr, target_w, target_h, fit_mode="cover", pad_col
 
 
 def _match_color_to(img_bgr, ref_bgr):
-    """Make a DSLR still look like the live view the customer saw: per-channel
-    histogram matching of brightness + mean/spread transfer of colour (LAB),
+    """Give a DSLR still the live view's colour: mean/spread transfer of the
+    LAB a/b channels (brightness is left as the camera exposed it),
     stats taken from
     downscaled copies, applied to the full-res image as a LUT.
     If the still has no colour (camera Picture Style = Monochrome) but the
-    live view does, only brightness is matched - colour can't be recovered."""
+    live view does, nothing can be done - colour can't be recovered."""
     if img_bgr is None or ref_bgr is None or img_bgr.size == 0 or ref_bgr.size == 0:
         return img_bgr
 
@@ -932,6 +932,11 @@ def _match_color_to(img_bgr, ref_bgr):
     chans = cv2.split(full_lab)
     out = []
     for c in range(3):
+        if c == 0:
+            # Brightness: keep the camera's exposure untouched; only the
+            # colour is matched to the live view.
+            out.append(chans[c])
+            continue
         if still_mono and c > 0:
             out.append(chans[c])
             continue
