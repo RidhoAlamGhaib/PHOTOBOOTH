@@ -124,8 +124,9 @@ _FALLBACK_DEFAULTS = {
     # Bonus shots on top of the layout's poses. Guest shoots poses+extra,
     # then picks which ones go into the frame. 0 = no picking step.
     "extra_shots":             2,
-    # Every shot (kept + bonus) saved as its own JPG, and uploaded to the
-    # session's Drive folder (subfolder "foto-individu").
+    # Every shot (retakes + bonus) saved locally as its own JPG; only the
+    # photos picked on the pick screen are uploaded to the session's Drive
+    # folder (subfolder "foto-individu").
     "individual_photos": {
         "save":          True,
         "upload":        True,
@@ -4350,7 +4351,9 @@ class MainWindow(QMainWindow):
         """Save every shot of the session (kept + bonus) as its own JPG under
         captures/SESSION_<ts>/ off the UI thread. Returns a job the upload
         step waits on: {"done": Event, "files": [(name, path)]}."""
-        job = {"done": threading.Event(), "files": []}
+        # files: every shot saved locally (backup). upload: only the photos the
+        # customer picked on the pick screen go to Google Drive.
+        job = {"done": threading.Event(), "files": [], "upload": []}
         icfg = CONFIG.get("individual_photos", {}) or {}
         shots = list(getattr(self, "_pending_all_shots", []) or [])
         if not icfg.get("save", True) or not shots:
@@ -4384,6 +4387,8 @@ class MainWindow(QMainWindow):
                         path = out_dir / name
                         path.write_bytes(buf.tobytes())
                         job["files"].append((name, path))
+                        if i in picked:
+                            job["upload"].append((name, path))
                     except Exception as e:
                         LOG.error(f"[INDIV] shot {i + 1} failed: {e}")
                 LOG.info(f"[INDIV] saved {len(job['files'])}/{len(shots)} to {out_dir}")
@@ -4563,10 +4568,10 @@ class MainWindow(QMainWindow):
                 self._ui(lambda: self.done_status.setText(
                     "MENYIAPKAN FOTO INDIVIDU\u2026"))
                 indiv_job["done"].wait(timeout=180)
-                if indiv_job["files"]:
+                if indiv_job["upload"]:
                     sub = uploader.create_folder("foto-individu", parent_id=folder_id)
                     target = sub["id"] if sub else folder_id
-                    queue += [(n, p, target) for n, p in indiv_job["files"]]
+                    queue += [(n, p, target) for n, p in indiv_job["upload"]]
             total = len(queue)
             failed = 0
             for i, (remote_name, local, parent) in enumerate(queue, 1):
