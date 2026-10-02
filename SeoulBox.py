@@ -159,6 +159,8 @@ _FALLBACK_DEFAULTS = {
         "canon_fail_timeout_s": 30,
         # Give the full-res DSLR photo the colour/brightness of the live view.
         "match_liveview_color": True,
+        # Correct greenish/yellow skin caused by coloured backdrops (auto WB).
+        "skin_tone_fix": True,
     },
     "camera_index":            None,
     "layouts": [
@@ -951,6 +953,50 @@ def _match_color_to(img_bgr, ref_bgr):
         lut = cv2.GaussianBlur(lut.reshape(1, -1).astype(np.float32), (0, 0), 2.0)
         out.append(cv2.LUT(chans[c], np.clip(lut, 0, 255).astype(np.uint8).reshape(-1)))
     return cv2.cvtColor(cv2.merge(out), cv2.COLOR_LAB2BGR)
+
+
+def skin_tone_correct(img_bgr, target_hue=45.0, ok_range=(34.0, 56.0), strength=0.85):
+    """Fix skin that looks green/yellow (or too pink) because a coloured
+    backdrop fooled the camera's auto white balance: measure the skin colour
+    on the detected faces and shift the photo's white balance so the skin
+    hue (LAB a/b angle) moves back toward natural (~45 deg). Photos whose
+    skin is already in the natural range are left untouched."""
+    if img_bgr is None or img_bgr.size == 0:
+        return img_bgr
+    faces = detect_faces(img_bgr)
+    if not faces:
+        return img_bgr
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    samples, weights = [], []
+    for fc in faces:
+        x, y, w, h = [int(v) for v in fc["box"]]
+        # Cheeks / nose band: mostly skin, little hair or background.
+        x0, x1 = max(0, x + int(w * 0.25)), min(lab.shape[1], x + int(w * 0.75))
+        y0, y1 = max(0, y + int(h * 0.45)), min(lab.shape[0], y + int(h * 0.7))
+        if x1 - x0 < 4 or y1 - y0 < 4:
+            continue
+        patch = lab[y0:y1, x0:x1].reshape(-1, 3).astype(np.float32)
+        samples.append(np.median(patch[:, 1:], axis=0) - 128.0)
+        weights.append(float(w * h))
+    if not samples:
+        return img_bgr
+    a, b = np.average(np.array(samples), axis=0, weights=np.array(weights))
+    chroma = float(np.hypot(a, b))
+    hue = float(np.degrees(np.arctan2(b, a)))
+    if chroma < 4.0 or ok_range[0] <= hue <= ok_range[1]:
+        return img_bgr
+    t = np.radians(target_hue)
+    da = (chroma * np.cos(t) - a) * strength
+    db = (chroma * np.sin(t) - b) * strength
+    n = float(np.hypot(da, db))
+    if n > 12.0:                       # never swing the colours wildly
+        da, db = da * 12.0 / n, db * 12.0 / n
+    LOG.info(f"[COLOR] skin hue {hue:.0f} deg (a={a:.1f} b={b:.1f}) -> "
+             f"shift a{da:+.1f} b{db:+.1f}")
+    lab = lab.astype(np.float32)
+    lab[..., 1] += da
+    lab[..., 2] += db
+    return cv2.cvtColor(np.clip(lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
 
 
 def _crop_to_aspect(img_bgr, aspect, max_long_side=0):
@@ -3723,6 +3769,11 @@ class MainWindow(QMainWindow):
         self.canon_mode = False
 
     def _show_shot_review(self, frame):
+        if (CONFIG.get("camera", {}) or {}).get("skin_tone_fix", True):
+            try:
+                frame = skin_tone_correct(frame)
+            except Exception as e:
+                LOG.warning(f"[COLOR] skin tone fix failed: {e}")
         self.current_frame_data = frame
         self.is_reviewing = True
         rgb = cv2.cvtColor(self.current_frame_data, cv2.COLOR_BGR2RGB)
