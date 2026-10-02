@@ -157,6 +157,8 @@ _FALLBACK_DEFAULTS = {
         # No live-view frame + no capture for this many seconds -> shut EDSDK
         # down and release the camera instead of keeping it stuck.
         "canon_fail_timeout_s": 30,
+        # Give the full-res DSLR photo the colour/brightness of the live view.
+        "match_liveview_color": True,
     },
     "camera_index":            None,
     "layouts": [
@@ -817,6 +819,59 @@ def crop_center_to_aspect(img_bgr, target_w, target_h, fit_mode="cover", pad_col
         y0 = (h - new_h) // 2
         cropped = img_bgr[y0:y0 + new_h, :]
     return cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+
+def _match_color_to(img_bgr, ref_bgr):
+    """Make a DSLR still look like the live view the customer saw: per-channel
+    histogram matching of brightness + mean/spread transfer of colour (LAB),
+    stats taken from
+    downscaled copies, applied to the full-res image as a LUT.
+    If the still has no colour (camera Picture Style = Monochrome) but the
+    live view does, only brightness is matched - colour can't be recovered."""
+    if img_bgr is None or ref_bgr is None or img_bgr.size == 0 or ref_bgr.size == 0:
+        return img_bgr
+
+    def _small(x, n=640):
+        h, w = x.shape[:2]
+        s = min(1.0, n / float(max(h, w)))
+        return cv2.resize(x, (max(1, int(w * s)), max(1, int(h * s))),
+                          interpolation=cv2.INTER_AREA) if s < 1 else x
+
+    src_lab = cv2.cvtColor(_small(img_bgr), cv2.COLOR_BGR2LAB)
+    ref_lab = cv2.cvtColor(_small(ref_bgr), cv2.COLOR_BGR2LAB)
+
+    def _chroma(lab):
+        return float(np.abs(lab[..., 1:].astype(np.float32) - 128).mean())
+
+    still_mono = _chroma(src_lab) < 1.5 and _chroma(ref_lab) > 4.0
+    if still_mono:
+        LOG.warning("[COLOR] DSLR photo is black & white but live view is colour - "
+                    "set the camera's Picture Style to Standard (not Monochrome)")
+    full_lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    chans = cv2.split(full_lab)
+    out = []
+    for c in range(3):
+        if still_mono and c > 0:
+            out.append(chans[c])
+            continue
+        if c > 0:
+            # Colour (a/b): shift + scale to the live view's mean/spread.
+            # Linear, so no hue artifacts in dark or clipped areas.
+            sm, ss = float(src_lab[..., c].mean()), float(src_lab[..., c].std())
+            rm, rs = float(ref_lab[..., c].mean()), float(ref_lab[..., c].std())
+            k = float(np.clip(rs / max(1e-3, ss), 0.5, 2.0))
+            lut = np.clip((np.arange(256, dtype=np.float32) - sm) * k + rm, 0, 255)
+            out.append(cv2.LUT(chans[c], lut.astype(np.uint8)))
+            continue
+        sh = np.bincount(src_lab[..., c].ravel(), minlength=256).astype(np.float64)
+        rh = np.bincount(ref_lab[..., c].ravel(), minlength=256).astype(np.float64)
+        scdf = np.cumsum(sh) / max(1.0, sh.sum())
+        rcdf = np.cumsum(rh) / max(1.0, rh.sum())
+        lut = np.clip(np.searchsorted(rcdf, scdf), 0, 255).astype(np.uint8)
+        # Smooth the curve a little so banding can't appear.
+        lut = cv2.GaussianBlur(lut.reshape(1, -1).astype(np.float32), (0, 0), 2.0)
+        out.append(cv2.LUT(chans[c], np.clip(lut, 0, 255).astype(np.uint8).reshape(-1)))
+    return cv2.cvtColor(cv2.merge(out), cv2.COLOR_LAB2BGR)
 
 
 def _crop_to_aspect(img_bgr, aspect, max_long_side=0):
@@ -3531,6 +3586,9 @@ class MainWindow(QMainWindow):
         """Ask the DSLR for a full-res shutter capture (non-blocking)."""
         self._pending_moving_clip = list(self.rolling_buffer)
         self._canon_waiting = True
+        # Live-view frame at the moment of the shot: the still gets its colour.
+        ref = getattr(self, "_last_uncropped_frame", None)
+        self._live_color_ref = ref.copy() if ref is not None else None
         try:
             self.countdown_label.setText("")
             self.countdown_label.show()
@@ -3551,6 +3609,11 @@ class MainWindow(QMainWindow):
         aspect = float(getattr(self.camera, "target_aspect", 3 / 4) or 3 / 4)
         if CONFIG.get("mirror", True):
             img = cv2.flip(img, 1)   # match the mirrored live view
+        if (CONFIG.get("camera", {}) or {}).get("match_liveview_color", True):
+            try:
+                img = _match_color_to(img, getattr(self, "_live_color_ref", None))
+            except Exception as e:
+                LOG.warning(f"[COLOR] live-view colour match failed: {e}")
         self._show_shot_review(
             _crop_to_aspect(img, aspect, self._canon_max_long))
 
