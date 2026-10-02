@@ -72,6 +72,10 @@ kEdsCameraCommand_ExtendShutDownTimer  = 0x00000001
 kEdsCameraCommand_PressShutterButton   = 0x00000004
 kEdsCameraCommand_DoEvfAf              = 0x00000102
 
+# EdsSendStatusCommand
+kEdsCameraStatusCommand_UILock   = 0x00000000
+kEdsCameraStatusCommand_UIUnLock = 0x00000001
+
 # Shutter-button params
 kEdsCameraCommand_ShutterButton_OFF                 = 0x00000000
 kEdsCameraCommand_ShutterButton_Halfway             = 0x00000001
@@ -241,6 +245,8 @@ class CanonCamera:
         d.EdsSetPropertyData.argtypes = [c_void_p, c_uint32, c_int, c_uint32, c_void_p]
         d.EdsSetCapacity.argtypes     = [c_void_p, EdsCapacity]
         d.EdsSendCommand.argtypes     = [c_void_p, c_uint32, c_int]
+        d.EdsSendStatusCommand.argtypes = [c_void_p, c_uint32, c_int]
+        d.EdsGetPropertyData.argtypes = [c_void_p, c_uint32, c_int, c_uint32, c_void_p]
         d.EdsSetObjectEventHandler.argtypes = [c_void_p, c_uint32, _CALLBACK, c_void_p]
         d.EdsCreateMemoryStream.argtypes = [c_uint64, POINTER(c_void_p)]
         d.EdsCreateEvfImageRef.argtypes  = [c_void_p, POINTER(c_void_p)]
@@ -286,7 +292,26 @@ class CanonCamera:
             pass
 
     # ---- lifecycle -----------------------------------------------------------
+    OPEN_ROUNDS = 3   # full disconnect/reconnect attempts while the body stays busy
+
     def open(self):
+        """Open the camera. If it stays DEVICE_BUSY (0x81) - typically left
+        over from a previous run - hang up completely and reconnect, which is
+        what a camera power-cycle does. Last round: continue with the card
+        as save target instead of failing."""
+        for rnd in range(1, self.OPEN_ROUNDS + 1):
+            try:
+                self._open_once(last_round=(rnd == self.OPEN_ROUNDS))
+                return self
+            except EdsError as e:
+                if (e.code & 0xFFFFFFFF) != EDS_ERR_DEVICE_BUSY or rnd == self.OPEN_ROUNDS:
+                    raise
+                LOG.warning(f"[CANON] camera busy (round {rnd}/{self.OPEN_ROUNDS}); "
+                            f"reconnecting")
+                self.close()
+                time.sleep(2.0)
+
+    def _open_once(self, last_round=False):
         if self._dll is None:
             self._load_dll()
         self._check(self._dll.EdsInitializeSDK(), "EdsInitializeSDK")
@@ -316,23 +341,56 @@ class CanonCamera:
         atexit.register(self.close)
 
         try:
-            # Download to host (PC), not the SD card. Retries while the body
-            # is still busy from the previous session (EDS_ERR 0x81).
-            self._set_prop_u32(kEdsPropID_SaveTo, kEdsSaveTo_Host)
-            # Tell the camera the host has "space" so it will release the shutter.
-            cap = EdsCapacity(0x7FFFFFFF, 0x1000, 1)
-            self._call_retry_busy(lambda: self._dll.EdsSetCapacity(self._camera, cap),
-                                  "EdsSetCapacity")
-            # Register the handler that downloads each new full-res image.
-            self._check(self._dll.EdsSetObjectEventHandler(
-                self._camera, kEdsObjectEvent_All, self._obj_cb, None),
-                "EdsSetObjectEventHandler")
+            self._setup_session(last_round)
         except Exception:
             # Don't leave a half-open session behind: that is what keeps the
             # camera busy for the next run.
             self.close()
             raise
-        return self
+
+    def _get_prop_u32(self, prop_id):
+        data = c_uint32(0)
+        code = self._dll.EdsGetPropertyData(self._camera, prop_id, 0, 4, byref(data))
+        return data.value if (code & 0xFFFFFFFF) == EDS_ERR_OK else None
+
+    def _setup_session(self, last_round):
+        # Lock the body's own UI while we configure it (Canon sample
+        # practice); an active camera UI answers property writes with BUSY.
+        locked = (self._dll.EdsSendStatusCommand(
+            self._camera, kEdsCameraStatusCommand_UILock, 0) & 0xFFFFFFFF) == EDS_ERR_OK
+        try:
+            # Download to host (PC), not the SD card.
+            try:
+                self._set_prop_u32(kEdsPropID_SaveTo, kEdsSaveTo_Host, busy_timeout=5.0)
+            except EdsError as e:
+                cur = self._get_prop_u32(kEdsPropID_SaveTo)
+                if (e.code & 0xFFFFFFFF) != EDS_ERR_DEVICE_BUSY:
+                    raise
+                if cur in (kEdsSaveTo_Host, kEdsSaveTo_Both):
+                    LOG.info(f"[CANON] SaveTo busy but already {cur}; continuing")
+                elif last_round:
+                    # Shots go to the SD card; DirItemCreated still downloads them.
+                    LOG.warning("[CANON] SaveTo stays busy; using camera card "
+                                "(needs an SD card inserted)")
+                else:
+                    raise
+            # Tell the camera the host has "space" so it will release the shutter.
+            cap = EdsCapacity(0x7FFFFFFF, 0x1000, 1)
+            try:
+                self._call_retry_busy(lambda: self._dll.EdsSetCapacity(self._camera, cap),
+                                      "EdsSetCapacity", timeout=5.0)
+            except EdsError as e:
+                if not last_round:
+                    raise
+                LOG.warning(f"[CANON] {e}; continuing")
+            # Register the handler that downloads each new full-res image.
+            self._check(self._dll.EdsSetObjectEventHandler(
+                self._camera, kEdsObjectEvent_All, self._obj_cb, None),
+                "EdsSetObjectEventHandler")
+        finally:
+            if locked:
+                self._dll.EdsSendStatusCommand(
+                    self._camera, kEdsCameraStatusCommand_UIUnLock, 0)
 
     def close(self):
         """Release everything: live view off, close session, TerminateSDK.
