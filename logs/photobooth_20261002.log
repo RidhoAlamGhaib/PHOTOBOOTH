@@ -38,6 +38,7 @@
 2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
 2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
 2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+<<<<<<< HEAD
 2026-10-02 09:22:39 [INFO] root: ============================================================
 2026-10-02 09:22:39 [INFO] root: Photobooth Ceria starting up
 2026-10-02 09:22:39 [INFO] root:   Python:    3.13.6
@@ -221,3 +222,5 @@
 2026-10-02 09:35:25 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1Au-gXPyjWvmJG30bpct5pXO9GrcKigSb/permissions?supportsAllDrives=true&alt=json
 2026-10-02 09:35:26 [INFO] root: [GDRIVE] session done: https://drive.google.com/drive/folders/1DzegRklKYX3LLsk02HKrjL8WzikGyiFy (9/9 ok)
 2026-10-02 09:39:23 [INFO] root: [CAMERA] Camera thread stopped
+=======
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d

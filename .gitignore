@@ -1,4 +1,7 @@
 dist/
 captures/
+<<<<<<< HEAD
 client_secret.json
 oauth_token.json
+=======
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d

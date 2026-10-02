@@ -1,5 +1,9 @@
 {
+<<<<<<< HEAD
   "countdown_seconds": 5,
+=======
+  "countdown_seconds": 10,
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
   "max_retakes_per_shot": 2,
   "review_auto_confirm_seconds": 5,
   "shots_per_session": 4,
@@ -8,12 +12,20 @@
     "save": true,
     "upload": true,
     "apply_filter": true,
+<<<<<<< HEAD
     "jpeg_quality": 100
+=======
+    "jpeg_quality": 95
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
   },
   "beautify_strength": 0.5,
   "slot_order": "legacy",
   "camera": {
+<<<<<<< HEAD
     "source": "opencv",
+=======
+    "source": "canon",
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
     "index": "auto",
     "backend": "any",
     "width": "auto",
@@ -97,7 +109,11 @@
   "print_bar_step": 2,
   "print_tick_ms": 40,
   "printing": {
+<<<<<<< HEAD
     "enabled": false,
+=======
+    "enabled": true,
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
     "mode": "DSRX",
     "printer_cut": "ds-rx1-1 (cut)",
     "printer_non_cut": "ds-rx1-1 (non_cut)",
@@ -118,7 +134,11 @@
   "gdrive": {
     "enabled": true,
     "event_name": "Wedding-Event",
+<<<<<<< HEAD
     "folder_id": "15WbipR4AXzEND20CVlLO7YKXCa3mJtno",
+=======
+    "folder_id": "PASTE_YOUR_FOLDER_ID_HERE",
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
     "client_secrets_path": "client_secret.json",
     "token_path": "oauth_token.json"
   },

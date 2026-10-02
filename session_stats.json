@@ -1,7 +1,13 @@
 {
+<<<<<<< HEAD
   "total": 2,
   "first_session": "2026-10-01 23:36:07",
   "last_session": "2026-10-02 09:34:56",
+=======
+  "total": 1,
+  "first_session": "2026-10-01 23:36:07",
+  "last_session": "2026-10-01 23:36:07",
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
   "sessions": [
     {
       "n": 1,
@@ -11,6 +17,7 @@
       "session_id": "Wedding-Event-20261001_233604-c4bc",
       "layout": "grid4",
       "folder_url": null
+<<<<<<< HEAD
     },
     {
       "n": 2,
@@ -28,6 +35,8 @@
         2
       ],
       "copies": 1
+=======
+>>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
     }
   ]
 }
