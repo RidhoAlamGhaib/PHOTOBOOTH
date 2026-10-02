@@ -96,6 +96,7 @@ Don't bundle these with `--add-data`; copy them after building. For `--onefile` 
 mkdir dist\SeoulBox
 move /Y dist\SeoulBox.exe dist\SeoulBox\
 xcopy /E /I /Y frames dist\SeoulBox\frames
+xcopy /E /I /Y models dist\SeoulBox\models
 copy /Y config.json dist\SeoulBox\
 ```
 
@@ -106,6 +107,7 @@ Copy these too **if you have them**:
 | File / folder | What it does | Needed when |
 |---|---|---|
 | `frames\` | Frame overlays per layout | Always |
+| `models\` | Face detector for Spotlight / Big Eyes / Big Head effects | Always (without it those effects fall back to a weaker detector) |
 | `config.json` | All settings | Always (if missing, the app writes defaults on first run) |
 | `client_secret.json` | Google OAuth client | Drive upload |
 | `oauth_token.json` | Saved Google login | Optional: skips the first-run browser login |
@@ -126,6 +128,7 @@ SeoulBox\
 ├─ config.json
 ├─ client_secret.json    (optional)
 ├─ frames\
+├─ models\
 ├─ fonts\                (optional)
 ├─ captures\             (auto)
 └─ logs\                 (auto)
@@ -158,6 +161,7 @@ if errorlevel 1 (
 if not exist dist\SeoulBox mkdir dist\SeoulBox
 move /Y dist\SeoulBox.exe dist\SeoulBox\ >nul
 xcopy /E /I /Y frames dist\SeoulBox\frames >nul
+xcopy /E /I /Y models dist\SeoulBox\models >nul
 if exist config.json         copy /Y config.json         dist\SeoulBox\ >nul
 if exist client_secret.json  copy /Y client_secret.json  dist\SeoulBox\ >nul
 if exist oauth_token.json    copy /Y oauth_token.json    dist\SeoulBox\ >nul

@@ -27,6 +27,7 @@ from functools import partial
 import cv2
 import numpy as np
 from PIL import Image
+from effects import EFFECT_IDS, EFFECT_LABELS, apply_effect
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
@@ -855,6 +856,9 @@ FILTER_LABELS = {
     "none":  "Original", "bw": "B&W", "noir": "Noir", "sepia": "Sepia",
     "warm": "Warm", "cool": "Cool", "vivid": "Vivid", "soft": "Soft", "fade": "Fade",
 }
+# Lens / lighting / face-aware / artistic effects (effects.py).
+FILTER_IDS += EFFECT_IDS
+FILTER_LABELS.update(EFFECT_LABELS)
 
 def beautify(img_bgr, strength=1.0):
     """Light auto-enhance for low-light / dull photos:
@@ -962,6 +966,8 @@ def apply_filter(img_bgr, name):
         b, g, r = cv2.split(out)
         r = np.clip(r + 6, 0, 255); b = np.clip(b - 4, 0, 255)
         return cv2.merge([b, g, r]).astype(np.uint8)
+    if name in EFFECT_IDS:
+        return apply_effect(img, name)
     return img
 
 
