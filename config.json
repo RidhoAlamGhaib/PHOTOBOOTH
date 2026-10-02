@@ -1,7 +1,7 @@
 {
   "countdown_seconds": 10,
   "camera_warmup_seconds": 5,
-  "mirror": true,
+  "mirror": false,
   "max_retakes_per_shot": 2,
   "review_auto_confirm_seconds": 5,
   "shots_per_session": 4,
@@ -15,7 +15,7 @@
   "beautify_strength": 0.5,
   "slot_order": "legacy",
   "camera": {
-    "source": "canon",
+    "source": "opencv",
     "index": "auto",
     "backend": "any",
     "width": "auto",
