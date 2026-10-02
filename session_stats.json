@@ -1,0 +1,33 @@
+{
+  "total": 2,
+  "first_session": "2026-10-01 23:36:07",
+  "last_session": "2026-10-02 09:34:56",
+  "sessions": [
+    {
+      "n": 1,
+      "timestamp": "2026-10-01 23:36:07",
+      "date": "2026-10-01",
+      "time": "23:36:07",
+      "session_id": "Wedding-Event-20261001_233604-c4bc",
+      "layout": "grid4",
+      "folder_url": null
+    },
+    {
+      "n": 2,
+      "timestamp": "2026-10-02 09:34:56",
+      "date": "2026-10-02",
+      "time": "09:34:56",
+      "session_id": "Wedding-Event-20261002_093430-2a2b",
+      "layout": "grid4",
+      "folder_url": "https://drive.google.com/drive/folders/1DzegRklKYX3LLsk02HKrjL8WzikGyiFy",
+      "shots_total": 6,
+      "picked": [
+        6,
+        5,
+        4,
+        2
+      ],
+      "copies": 1
+    }
+  ]
+}

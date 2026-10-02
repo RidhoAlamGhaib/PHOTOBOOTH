@@ -1,0 +1,145 @@
+2026-10-01 22:43:45 [INFO] root: ============================================================
+2026-10-01 22:43:45 [INFO] root: Photobooth Ceria starting up
+2026-10-01 22:43:45 [INFO] root:   Python:    3.14.8
+2026-10-01 22:43:45 [INFO] root:   Platform:  Windows 10
+2026-10-01 22:43:45 [INFO] root:   Frozen:    False
+2026-10-01 22:43:45 [INFO] root:   BASE_DIR:  C:\Users\Junesystems\Documents\photobooth
+2026-10-01 22:43:45 [INFO] root:   Log file:  C:\Users\Junesystems\Documents\photobooth\logs\photobooth_20261001.log
+2026-10-01 22:43:45 [INFO] root: ============================================================
+2026-10-01 22:43:45 [INFO] root: [UI] screen 1920x1040 — applying UI scale 0.963
+2026-10-01 22:43:45 [INFO] root: [CAMERA] Scanning for available cameras (indices 0-9)...
+2026-10-01 22:43:45 [WARNING] root: [CAMERA] No cameras detected!
+2026-10-01 22:43:45 [ERROR] root: [CAMERA] No cameras found during auto-detection
+2026-10-01 22:46:07 [INFO] root: ============================================================
+2026-10-01 22:46:07 [INFO] root: Photobooth Ceria starting up
+2026-10-01 22:46:07 [INFO] root:   Python:    3.14.8
+2026-10-01 22:46:07 [INFO] root:   Platform:  Windows 10
+2026-10-01 22:46:07 [INFO] root:   Frozen:    False
+2026-10-01 22:46:07 [INFO] root:   BASE_DIR:  C:\Users\Junesystems\Documents\photobooth
+2026-10-01 22:46:07 [INFO] root:   Log file:  C:\Users\Junesystems\Documents\photobooth\logs\photobooth_20261001.log
+2026-10-01 22:46:07 [INFO] root: ============================================================
+2026-10-01 22:46:07 [INFO] root: [UI] screen 1920x1040 — applying UI scale 0.963
+2026-10-01 22:46:07 [INFO] root: [CAMERA] Scanning for available cameras (indices 0-9)...
+2026-10-01 22:46:07 [WARNING] root: [CAMERA] No cameras detected!
+2026-10-01 22:46:07 [ERROR] root: [CAMERA] No cameras found during auto-detection
+2026-10-01 22:46:09 [DEBUG] PIL.Image: Importing PngImagePlugin
+2026-10-01 22:46:09 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 22:46:09 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 22:46:09 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 22:57:57 [INFO] root: ============================================================
+2026-10-01 22:57:57 [INFO] root: Photobooth Ceria starting up
+2026-10-01 22:57:57 [INFO] root:   Python:    3.14.8
+2026-10-01 22:57:57 [INFO] root:   Platform:  Windows 10
+2026-10-01 22:57:57 [INFO] root:   Frozen:    False
+2026-10-01 22:57:57 [INFO] root:   BASE_DIR:  C:\Users\Junesystems\Documents\photobooth
+2026-10-01 22:57:57 [INFO] root:   Log file:  C:\Users\Junesystems\Documents\photobooth\logs\photobooth_20261001.log
+2026-10-01 22:57:57 [INFO] root: ============================================================
+2026-10-01 22:57:57 [INFO] root: [UI] screen 1920x1040 — applying UI scale 0.963
+2026-10-01 22:57:58 [INFO] root: [CAMERA] Scanning for available cameras (indices 0-9)...
+2026-10-01 22:57:58 [WARNING] root: [CAMERA] No cameras detected!
+2026-10-01 22:57:58 [ERROR] root: [CAMERA] No cameras found during auto-detection
+2026-10-01 22:58:00 [DEBUG] PIL.Image: Importing PngImagePlugin
+2026-10-01 22:58:00 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 22:58:00 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 22:58:00 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:00:04 [INFO] root: ============================================================
+2026-10-01 23:00:04 [INFO] root: Photobooth Ceria starting up
+2026-10-01 23:00:04 [INFO] root:   Python:    3.14.8
+2026-10-01 23:00:04 [INFO] root:   Platform:  Windows 10
+2026-10-01 23:00:04 [INFO] root:   Frozen:    False
+2026-10-01 23:00:04 [INFO] root:   BASE_DIR:  C:\Users\Junesystems\Documents\photobooth
+2026-10-01 23:00:04 [INFO] root:   Log file:  C:\Users\Junesystems\Documents\photobooth\logs\photobooth_20261001.log
+2026-10-01 23:00:04 [INFO] root: ============================================================
+2026-10-01 23:00:04 [INFO] root: [UI] screen 1920x1040 — applying UI scale 0.963
+2026-10-01 23:00:05 [INFO] root: [CAMERA] source=canon (Canon DSLR via EDSDK)
+2026-10-01 23:00:05 [INFO] canon_edsdk: [CANON] session opened
+2026-10-01 23:00:05 [INFO] canon_edsdk: [CANON] live view -> PC
+2026-10-01 23:00:11 [DEBUG] PIL.Image: Importing PngImagePlugin
+2026-10-01 23:00:11 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:00:11 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:00:11 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:00:23 [WARNING] canon_edsdk: [CANON] PressShutterButton returned 0x00008D01; falling back to TakePicture
+2026-10-01 23:00:24 [ERROR] canon_edsdk: [CANON] capture failed: TakePicture failed: EDS_ERR 0x00008D01
+2026-10-01 23:00:24 [ERROR] root: [CANON] capture failed (TakePicture failed: EDS_ERR 0x00008D01) — using live-view frame
+2026-10-01 23:00:50 [WARNING] canon_edsdk: [CANON] stop live view: EdsSetPropertyData(0x500) failed: EDS_ERR 0x00000081
+2026-10-01 23:00:50 [INFO] canon_edsdk: [CANON] session closed
+2026-10-01 23:00:50 [INFO] canon_edsdk: [CANON] camera thread stopped
+2026-10-01 23:34:25 [INFO] root: ============================================================
+2026-10-01 23:34:25 [INFO] root: Photobooth Ceria starting up
+2026-10-01 23:34:25 [INFO] root:   Python:    3.14.3
+2026-10-01 23:34:25 [INFO] root:   Platform:  Windows 10
+2026-10-01 23:34:25 [INFO] root:   Frozen:    False
+2026-10-01 23:34:25 [INFO] root:   BASE_DIR:  C:\Users\Junesystems\Documents\photobooth
+2026-10-01 23:34:25 [INFO] root:   Log file:  C:\Users\Junesystems\Documents\photobooth\logs\photobooth_20261001.log
+2026-10-01 23:34:25 [INFO] root: ============================================================
+2026-10-01 23:34:25 [INFO] root: [UI] screen 1920x1040 — applying UI scale 0.963
+2026-10-01 23:34:26 [INFO] root: [CAMERA] config camera.source='canon' index='auto'
+2026-10-01 23:34:26 [INFO] root: [CAMERA] source=canon (Canon DSLR via EDSDK)
+2026-10-01 23:34:26 [INFO] canon_edsdk: [CANON] session opened
+2026-10-01 23:34:26 [INFO] canon_edsdk: [CANON] live view -> PC
+2026-10-01 23:34:33 [DEBUG] PIL.Image: Importing PngImagePlugin
+2026-10-01 23:34:33 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:34:33 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:34:33 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:34:44 [WARNING] canon_edsdk: [CANON] PressShutterButton returned 0x00008D01; falling back to TakePicture
+2026-10-01 23:34:44 [ERROR] canon_edsdk: [CANON] capture failed: TakePicture failed: EDS_ERR 0x00008D01
+2026-10-01 23:34:44 [ERROR] root: [CANON] capture failed (TakePicture failed: EDS_ERR 0x00008D01) — using live-view frame
+2026-10-01 23:34:59 [WARNING] canon_edsdk: [CANON] PressShutterButton returned 0x00008D01; falling back to TakePicture
+2026-10-01 23:34:59 [ERROR] canon_edsdk: [CANON] capture failed: TakePicture failed: EDS_ERR 0x00008D01
+2026-10-01 23:34:59 [ERROR] root: [CANON] capture failed (TakePicture failed: EDS_ERR 0x00008D01) — using live-view frame
+2026-10-01 23:35:13 [WARNING] canon_edsdk: [CANON] PressShutterButton returned 0x00008D01; falling back to TakePicture
+2026-10-01 23:35:13 [ERROR] canon_edsdk: [CANON] capture failed: TakePicture failed: EDS_ERR 0x00008D01
+2026-10-01 23:35:13 [ERROR] root: [CANON] capture failed (TakePicture failed: EDS_ERR 0x00008D01) — using live-view frame
+2026-10-01 23:35:24 [WARNING] canon_edsdk: [CANON] PressShutterButton returned 0x00008D01; falling back to TakePicture
+2026-10-01 23:35:24 [ERROR] canon_edsdk: [CANON] capture failed: TakePicture failed: EDS_ERR 0x00008D01
+2026-10-01 23:35:24 [ERROR] root: [CANON] capture failed (TakePicture failed: EDS_ERR 0x00008D01) — using live-view frame
+2026-10-01 23:35:25 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:25 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:25 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:35:28 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:28 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:28 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26552
+2026-10-01 23:35:29 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:29 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:29 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 25618
+2026-10-01 23:35:31 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:31 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:31 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26552
+2026-10-01 23:35:32 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:32 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:32 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:35:33 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:33 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:33 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26552
+2026-10-01 23:35:34 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:34 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:34 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 25618
+2026-10-01 23:35:38 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:38 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:38 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 25618
+2026-10-01 23:35:42 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:42 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:42 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 25618
+2026-10-01 23:35:44 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:44 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:44 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 25618
+2026-10-01 23:35:47 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:35:47 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:35:47 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:36:03 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:36:03 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:36:03 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:36:04 [INFO] root: [GDRIVE] folder_id not configured
+2026-10-01 23:36:04 [WARNING] root: [PRINT] pywin32 not available: No module named 'win32print'
+2026-10-01 23:36:04 [INFO] root: [SAVE] clean PNG: C:\Users\Junesystems\Documents\photobooth\captures\FINAL_20261001_233604.png
+2026-10-01 23:36:07 [INFO] root: [STATS] session #1 logged @ 2026-10-01 23:36:07
+2026-10-01 23:36:07 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:36:07 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:36:07 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:36:09 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-01 23:36:09 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-01 23:36:09 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-01 23:36:11 [WARNING] root: [GDRIVE] no folder/uploader from prep — skipping upload
+2026-10-01 23:36:14 [WARNING] canon_edsdk: [CANON] stop live view: EdsSetPropertyData(0x500) failed: EDS_ERR 0x00000081
+2026-10-01 23:36:14 [INFO] canon_edsdk: [CANON] session closed
+2026-10-01 23:36:14 [INFO] canon_edsdk: [CANON] camera thread stopped

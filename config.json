@@ -1,0 +1,144 @@
+{
+  "countdown_seconds": 5,
+  "max_retakes_per_shot": 2,
+  "review_auto_confirm_seconds": 5,
+  "shots_per_session": 4,
+  "extra_shots": 2,
+  "individual_photos": {
+    "save": true,
+    "upload": true,
+    "apply_filter": true,
+    "jpeg_quality": 100
+  },
+  "beautify_strength": 0.5,
+  "slot_order": "legacy",
+  "camera": {
+    "source": "opencv",
+    "index": "auto",
+    "backend": "any",
+    "width": "auto",
+    "height": "auto",
+    "fit_mode": "cover",
+    "edsdk_dll_dir": "",
+    "canon_max_long_side": 3000,
+    "canon_use_af": true,
+    "canon_fail_timeout_s": 30
+  },
+  "camera_index": null,
+  "layouts": [
+    {
+      "id": "grid4",
+      "name": "4 Foto — Grid 2×2",
+      "paper": "4x6 portrait",
+      "poses": 4,
+      "frame_dir": "frames/a",
+      "cut": "none"
+    },
+    {
+      "id": "8dup",
+      "name": "8 Foto — Strip dgn Duplikat (CUT)",
+      "poses": 8,
+      "frame_dir": "frames/ST8dup",
+      "slot_to_pose": [
+        0,
+        0,
+        1,
+        1,
+        2,
+        2,
+        3,
+        3
+      ],
+      "cut": "2inch",
+      "paper_name": "PR (2x6)*2"
+    },
+    {
+      "id": "8poseCut",
+      "name": "8 Foto — Strip dgn Duplikat (CUT)",
+      "poses": 8,
+      "frame_dir": "frames/ST8dup",
+      "slot_to_pose": [
+        0,
+        4,
+        1,
+        5,
+        2,
+        6,
+        3,
+        7
+      ],
+      "cut": "2inch",
+      "paper_name": "PR (2x6)*2"
+    },
+    {
+      "id": "strip6",
+      "name": "6 Foto Landscape (CUT)",
+      "poses": 6,
+      "frame_dir": "frames/ST6dup",
+      "cut": "2inch",
+      "paper_name": "PR (2x6)*2"
+    },
+    {
+      "id": "test",
+      "name": "3 Foto",
+      "poses": 3,
+      "frame_dir": "frames/test",
+      "cut": "none"
+    }
+  ],
+  "default_layout_id": "grid4",
+  "video_fps": 25,
+  "bts_speed": 0.8,
+  "bts_max_duration_s": 30.0,
+  "moving_clip_s": 3.0,
+  "moving_speed": 1.0,
+  "video_short_side_px": 480,
+  "print_bar_phase1_pct": 60,
+  "print_bar_step": 2,
+  "print_tick_ms": 40,
+  "printing": {
+    "enabled": false,
+    "mode": "DSRX",
+    "printer_cut": "ds-rx1-1 (cut)",
+    "printer_non_cut": "ds-rx1-1 (non_cut)",
+    "preferred_printer": "",
+    "paper_size": "4x6",
+    "dpi": 300,
+    "max_extra_prints": 3,
+    "other": {
+      "printer": "",
+      "paper_w_mm": 100,
+      "paper_h_mm": 150,
+      "quality": "best",
+      "media_type": "matte",
+      "paper_name": "",
+      "fit_mode": "driver"
+    }
+  },
+  "gdrive": {
+    "enabled": true,
+    "event_name": "Wedding-Event",
+    "folder_id": "15WbipR4AXzEND20CVlLO7YKXCa3mJtno",
+    "client_secrets_path": "client_secret.json",
+    "token_path": "oauth_token.json"
+  },
+  "stamp": {
+    "qr_size_pct": 0.06,
+    "qr_position": "bottom-left",
+    "password_position": "bottom-right",
+    "password_font_pct": 0.02,
+    "qr_inset_x_pct": 0.03,
+    "qr_inset_y_pct": 0.035,
+    "password_inset_x_pct": 0.03,
+    "password_inset_y_pct": 0.035
+  },
+  "access_code": {
+    "mode": "free"
+  },
+  "ui": {
+    "studio_name": "NEO PHOTO STUDIO",
+    "app_title": "Photobooth Ceria",
+    "tagline": "Abadikan momen seru kamu — empat foto, satu memori.",
+    "start_button": "Mulai Sesi  →"
+  }
+}

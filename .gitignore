@@ -1,0 +1,4 @@
+dist/
+captures/
+client_secret.json
+oauth_token.json
