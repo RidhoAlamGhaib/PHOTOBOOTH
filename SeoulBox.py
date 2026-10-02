@@ -3393,7 +3393,7 @@ class MainWindow(QMainWindow):
         self.fp_preview.setGeometry(nx, ny, new_w, new_h)
         rgb = canvas.convert("RGB")
         data = rgb.tobytes("raw", "RGB")
-        qimg = QImage(data, rgb.width, rgb.height, QImage.Format_RGB888)
+        qimg = QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format_RGB888)
         pix = QPixmap.fromImage(qimg).scaled(new_w, new_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.fp_preview.setPixmap(pix)
 
@@ -4634,7 +4634,7 @@ class MainWindow(QMainWindow):
         if self.temp_canvas is not None:
             rgb = self.temp_canvas.convert("RGB")
             data = rgb.tobytes("raw", "RGB")
-            qimg = QImage(data, rgb.width, rgb.height, QImage.Format_RGB888)
+            qimg = QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format_RGB888)
             pix = QPixmap.fromImage(qimg).scaled(
                 self.done_thumb.contentsRect().width(), self.done_thumb.contentsRect().height(),
                 Qt.KeepAspectRatio, Qt.SmoothTransformation)
