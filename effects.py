@@ -21,12 +21,12 @@ import numpy as np
 LOG = logging.getLogger("effects")
 
 EFFECT_IDS = [
-    "fisheye", "vignette", "glow", "lightleak", "film", "duotone", "neon",
+    "fisheye", "convex", "vignette", "glow", "lightleak", "film", "duotone", "neon",
     "spotlight", "bigeyes", "bighead",
     "sketch", "comic", "popart", "vintage70",
 ]
 EFFECT_LABELS = {
-    "fisheye": "Fisheye", "vignette": "Vignette", "glow": "Glow",
+    "fisheye": "Fisheye", "convex": "Cembung", "vignette": "Vignette", "glow": "Glow",
     "lightleak": "Light Leak", "film": "Film", "duotone": "Duotone",
     "neon": "Neon", "spotlight": "Spotlight", "bigeyes": "Big Eyes",
     "bighead": "Big Head", "sketch": "Sketch", "comic": "Comic",
@@ -196,6 +196,34 @@ def fx_fisheye(img):
                     interpolation=cv2.INTER_LINEAR)
     out = cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     return _u8(_f(out) * _vignette_mask(h, w, 0.5, 2.5))
+
+
+def fx_convex(img, k=0.85):
+    """Action-cam / peephole convex lens: strong barrel bend (centre bulges,
+    straight edges curve), dark round falloff, muted colour, punchy contrast."""
+    h, w = img.shape[:2]
+    step = 4
+    sh, sw = max(2, h // step), max(2, w // step)
+    ys, xs = np.mgrid[0:sh, 0:sw].astype(np.float32)
+    cx, cy = (sw - 1) / 2.0, (sh - 1) / 2.0
+    dx, dy = xs - cx, ys - cy
+    r2 = (dx * dx + dy * dy) / (cx * cx + cy * cy)
+    # r_src = r (1 + k r^2) / (1 + k): corners map to corners, centre magnified.
+    f = ((1.0 + k * r2) / (1.0 + k)).astype(np.float32)
+    mx = cv2.resize(((cx + dx * f) * (w / float(sw))).astype(np.float32), (w, h),
+                    interpolation=cv2.INTER_LINEAR)
+    my = cv2.resize(((cy + dy * f) * (h / float(sh))).astype(np.float32), (w, h),
+                    interpolation=cv2.INTER_LINEAR)
+    out = cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[..., 1] *= 0.7
+    o = _f(cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR))
+    o = np.clip((o - 0.5) * 1.18 + 0.5, 0, 1)          # contrast
+    o = o * np.array([1.03, 1.0, 0.97], np.float32)     # slightly cool
+    # Round lens falloff: bright centre, edges sink toward black.
+    r = _radial(h, w)
+    fall = np.clip(1.0 - 0.95 * np.power(np.clip((r - 0.45) / 0.55, 0, 1), 1.6), 0, 1)
+    return _u8(o * fall[..., None])
 
 
 def fx_vignette(img):
@@ -374,7 +402,7 @@ def fx_vintage70(img):
 
 
 _FX = {
-    "fisheye": fx_fisheye, "vignette": fx_vignette, "glow": fx_glow,
+    "fisheye": fx_fisheye, "convex": fx_convex, "vignette": fx_vignette, "glow": fx_glow,
     "lightleak": fx_lightleak, "film": fx_film, "duotone": fx_duotone,
     "neon": fx_neon, "spotlight": fx_spotlight, "bigeyes": fx_bigeyes,
     "bighead": fx_bighead, "sketch": fx_sketch, "comic": fx_comic,
