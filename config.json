@@ -108,6 +108,13 @@
   "access_code": {
     "mode": "free"
   },
+  "cleanup": {
+    "enabled": true,
+    "drive_days": 30,
+    "drive_permanent_delete": true,
+    "local_days": 30,
+    "logs_days": 60
+  },
   "ui": {
     "studio_name": "NEO PHOTO STUDIO",
     "app_title": "Photobooth Ceria",

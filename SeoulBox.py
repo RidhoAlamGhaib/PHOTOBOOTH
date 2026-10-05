@@ -238,6 +238,15 @@ _FALLBACK_DEFAULTS = {
     "access_code": {
         "mode": "free",
     },
+    # Automatic storage cleanup (runs at start-up and every 24 h).
+    # Session folders/files older than N days are removed. 0 = keep forever.
+    "cleanup": {
+        "enabled":                False,
+        "drive_days":             30,    # session folders in Google Drive
+        "drive_permanent_delete": True,  # False = move to Drive trash (still uses quota ~30 days)
+        "local_days":             30,    # captures/ on the booth PC
+        "logs_days":              60,    # logs/
+    },
     "ui": {
         "studio_name":      "NEO PHOTO STUDIO",
         "app_title":        "Photobooth Ceria",
@@ -1242,6 +1251,52 @@ def stamp_password_on_image(pil_img, password, qr_url=None):
         return pil_img
 
 
+def cleanup_local_storage(local_days, logs_days):
+    """Delete local session files older than N days:
+    captures/SESSION_<ts>/, FINAL_<ts>.png, BTS_<ts>.mp4, LIVE_<ts>.mp4 and
+    logs/photobooth_<date>.log. Age comes from the timestamp in the name.
+    Returns the number of items removed."""
+    import re as _re
+    import shutil
+    now = datetime.datetime.now()
+    removed = 0
+    if local_days and local_days > 0:
+        cutoff = now - datetime.timedelta(days=local_days)
+        pat = _re.compile(r"^(SESSION|FINAL|BTS|LIVE)_(\d{8}_\d{6})")
+        for p in SAVE_DIR.iterdir():
+            m = pat.match(p.name)
+            if not m:
+                continue
+            try:
+                ts = datetime.datetime.strptime(m.group(2), "%Y%m%d_%H%M%S")
+            except ValueError:
+                continue
+            if ts >= cutoff:
+                continue
+            try:
+                shutil.rmtree(p) if p.is_dir() else p.unlink()
+                removed += 1
+            except Exception as e:
+                LOG.warning(f"[CLEANUP] could not delete {p}: {e}")
+    if logs_days and logs_days > 0:
+        cutoff = now - datetime.timedelta(days=logs_days)
+        today_log = f"photobooth_{now.strftime('%Y%m%d')}.log"
+        for p in LOG_DIR.glob("photobooth_*.log"):
+            if p.name == today_log:
+                continue
+            try:
+                ts = datetime.datetime.strptime(p.stem.split("_")[-1], "%Y%m%d")
+            except ValueError:
+                continue
+            if ts < cutoff:
+                try:
+                    p.unlink()
+                    removed += 1
+                except Exception as e:
+                    LOG.warning(f"[CLEANUP] could not delete {p}: {e}")
+    return removed
+
+
 class GDriveUploader:
     SCOPES = ["https://www.googleapis.com/auth/drive.file"]
     def __init__(self, client_secrets_path, folder_id, token_path="oauth_token.json"):
@@ -1346,6 +1401,50 @@ class GDriveUploader:
         except Exception as e:
             LOG.error(f"[GDRIVE] create_folder failed: {e}")
             return None
+
+    def delete_old_session_folders(self, older_than_days, permanent=True):
+        """Remove session folders this app created in the event folder that are
+        older than N days. Only folders named like a session
+        (<event>-YYYYmmdd_HHMMSS-xxxx) are touched; the drive.file scope also
+        limits the app to files it created itself. Returns (removed, failed)."""
+        import re as _re
+        self._ensure_service()
+        if self._service is None or not self.folder_id:
+            return 0, 0
+        cutoff = (datetime.datetime.utcnow()
+                  - datetime.timedelta(days=older_than_days)).strftime("%Y-%m-%dT%H:%M:%S")
+        q = (f"'{self.folder_id}' in parents and trashed = false and "
+             f"mimeType = 'application/vnd.google-apps.folder' and createdTime < '{cutoff}'")
+        pat = _re.compile(r"^.+-\d{8}_\d{6}-[0-9a-f]{4}$")
+        removed = failed = 0
+        token = None
+        while True:
+            try:
+                res = self._service.files().list(
+                    q=q, fields="nextPageToken, files(id, name, createdTime)",
+                    pageSize=200, pageToken=token,
+                    supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+            except Exception as e:
+                LOG.error(f"[CLEANUP] Drive list failed: {e}")
+                break
+            for f in res.get("files", []):
+                if not pat.match(f.get("name", "")):
+                    continue
+                try:
+                    if permanent:
+                        self._service.files().delete(fileId=f["id"], supportsAllDrives=True).execute()
+                    else:
+                        self._service.files().update(fileId=f["id"], body={"trashed": True},
+                                                     supportsAllDrives=True).execute()
+                    removed += 1
+                    LOG.info(f"[CLEANUP] Drive: removed {f['name']} (created {f.get('createdTime')})")
+                except Exception as e:
+                    failed += 1
+                    LOG.warning(f"[CLEANUP] Drive: could not remove {f.get('name')}: {e}")
+            token = res.get("nextPageToken")
+            if not token:
+                break
+        return removed, failed
 
     def _make_public(self, file_id):
         try:
@@ -1818,6 +1917,47 @@ class MainWindow(QMainWindow):
         # connection instead of one long-lived handle that goes stale.
         self.camera = None
         QTimer.singleShot(0, self._fit_capture_layout)
+        # Storage cleanup: shortly after start-up, then once a day.
+        self._cleanup_timer = QTimer(self)
+        self._cleanup_timer.setInterval(24 * 3600 * 1000)
+        self._cleanup_timer.timeout.connect(self._run_cleanup)
+        self._cleanup_timer.start()
+        QTimer.singleShot(20000, self._run_cleanup)
+
+    def _run_cleanup(self):
+        """Remove old sessions locally and in Google Drive (background thread)."""
+        cfg = CONFIG.get("cleanup", {}) or {}
+        if not cfg.get("enabled", False):
+            return
+        if getattr(self, "_cleanup_running", False):
+            return
+        self._cleanup_running = True
+
+        def _work():
+            try:
+                n = cleanup_local_storage(int(cfg.get("local_days", 0) or 0),
+                                          int(cfg.get("logs_days", 0) or 0))
+                LOG.info(f"[CLEANUP] local: removed {n} old item(s)")
+                days = int(cfg.get("drive_days", 0) or 0)
+                gd = _load_gdrive_config()
+                fid = (gd.get("folder_id") or "").strip()
+                tok = Path(gd.get("token_path", "oauth_token.json"))
+                tok = tok if tok.is_absolute() else BASE_DIR / tok
+                # Only with a saved login: never pop a browser sign-in from here.
+                if (days > 0 and gd.get("enabled", False) and fid
+                        and fid != "PASTE_YOUR_FOLDER_ID_HERE" and tok.exists()):
+                    up = GDriveUploader(gd.get("client_secrets_path", "client_secret.json"),
+                                        gd.get("folder_id"), gd.get("token_path", "oauth_token.json"))
+                    ok, bad = up.delete_old_session_folders(
+                        days, permanent=bool(cfg.get("drive_permanent_delete", True)))
+                    LOG.info(f"[CLEANUP] Drive: removed {ok} session folder(s) older than "
+                             f"{days} days" + (f", {bad} failed" if bad else ""))
+            except Exception as e:
+                LOG.error(f"[CLEANUP] failed: {e}")
+            finally:
+                self._cleanup_running = False
+
+        threading.Thread(target=_work, daemon=True).start()
 
     # ================= CAMERA LIFECYCLE (one connection per session) =================
     def _create_camera(self):
