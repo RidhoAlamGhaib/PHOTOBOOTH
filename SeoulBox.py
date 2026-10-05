@@ -210,6 +210,7 @@ _FALLBACK_DEFAULTS = {
             "warn_below":       50,    # home screen shows "Kertas tinggal N"
             "block_when_empty": True,  # disable "Mulai Sesi" when the roll is
                                        # empty or the printer needs attention
+            "printer_name":     "DS-RX1",  # Windows printer the status is read from
             "dnp_dll_dir":      "",    # folder with CyStat.dll ("" = search)
             "poll_s":           15,
         },
@@ -2082,11 +2083,14 @@ class MainWindow(QMainWindow):
             return
         if platform.system() != "Windows":
             return
-        name = (_find_preferred_printer(pcfg.get("printer_non_cut"))
-                or _find_preferred_printer(pcfg.get("printer_cut"))
-                or _find_preferred_printer(pcfg.get("preferred_printer")))
+        # Status is read from the base DNP printer (default "DS-RX1"), not the
+        # "(cut)/(non_cut)" print queues. Exact name match (case-insensitive).
+        want = (mcfg.get("printer_name") or "DS-RX1").strip().lower()
+        printers = _list_printers_win()
+        name = next((p for p in printers if p.strip().lower() == want), None)
         if not name:
-            LOG.warning("[DNP] printer not found - paper counter disabled")
+            LOG.warning(f"[DNP] printer named {want!r} not found - paper counter disabled. "
+                        f"Installed printers: {printers}")
             return
         self.dnp = dnp_status.DnpMonitor(name, dll_dir=(mcfg.get("dnp_dll_dir") or None),
                                          poll_s=float(mcfg.get("poll_s", 15)))

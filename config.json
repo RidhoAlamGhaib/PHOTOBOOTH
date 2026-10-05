@@ -82,6 +82,7 @@
       "enabled": true,
       "warn_below": 50,
       "block_when_empty": true,
+      "printer_name": "DS-RX1",
       "dnp_dll_dir": "",
       "poll_s": 15
     },

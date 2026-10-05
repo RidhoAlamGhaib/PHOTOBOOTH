@@ -174,28 +174,11 @@ class DnpMonitor:
         port_name = _printer_port(self.printer_name)
         if not port_name:
             raise RuntimeError(f"no port for printer {self.printer_name!r}")
-        ret = self._dll.PortInitialize(port_name.encode("ascii", "ignore"))
-        if ret < 0:
-            raise RuntimeError(f"PortInitialize({port_name}) returned {ret}")
-        # The return value isn't always the port index the other calls want
-        # (e.g. it can be 1 = "found 1 printer" while the printer is port 0).
-        # Probe the likely indexes and keep the first one that answers.
-        candidates = []
-        for c in (ret, ret - 1, 0, 1, 2, 3):
-            if c >= 0 and c not in candidates:
-                candidates.append(c)
-        answers = {}
-        for c in candidates:
-            st = self._dll.GetStatus(c) & 0xFFFFFFFF
-            answers[c] = st
-            if not (st & 0x80000000):
-                self._port = c
-                LOG.info(f"[DNP] {self.printer_name} on {port_name}: PortInitialize={ret}, "
-                         f"using port {c} (status 0x{st:08X})")
-                return
-        raise RuntimeError("printer not responding on any port index ("
-                           + ", ".join(f"{k}:0x{v:08X}" for k, v in answers.items())
-                           + "); check the USB cable and that the printer is on")
+        port = self._dll.PortInitialize(port_name.encode("ascii", "ignore"))
+        if port < 0:
+            raise RuntimeError(f"PortInitialize({port_name}) returned {port}")
+        self._port = port
+        LOG.info(f"[DNP] {self.printer_name} on {port_name} -> port {port}")
 
     def _read(self):
         d, p = self._dll, self._port
