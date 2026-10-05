@@ -327,6 +327,138 @@ def _load_app_config():
 def _load_gdrive_config():
     return CONFIG.get("gdrive", {})
 
+# ================= QRIS PAYMENT (MIDTRANS) =================
+# Hard-wired here on purpose (not in config.json).
+#
+# Leave MIDTRANS_SERVER_KEY empty  ->  MOCK mode: the payment screen shows a
+# demo QR (no real payment) and a "Simulasi lunas" button for staff.
+#
+# Before filling these in, Midtrans needs:
+#   - A verified merchant account at dashboard.midtrans.com
+#       individual: KTP + NPWP + bank account in the owner's name
+#       company (PT/CV): NIB, NPWP badan, akta/SK, company bank account
+#   - QRIS (and/or GoPay) payment channel ACTIVATED on that account
+#     (otherwise charges fail with "One or more merchant settings is invalid")
+#   - Server Key from Dashboard > Settings > Access Keys
+#       sandbox:    "SB-Mid-server-..."  (test, no real money)
+#       production: "Mid-server-..."     (real money) + MIDTRANS_IS_PRODUCTION = True
+#   - Internet at the booth (status is polled; no webhook/server needed)
+# The Server Key is a secret: anyone who has it can charge/cancel on your account.
+PAYMENT_ENABLED         = True
+MIDTRANS_SERVER_KEY     = ""        # e.g. "SB-Mid-server-xxxxxxxx"
+MIDTRANS_IS_PRODUCTION  = False
+MIDTRANS_MERCHANT_ID    = ""        # e.g. "G123456789" (reference only)
+QRIS_ACQUIRER           = "gopay"
+PAYMENT_TIMEOUT_MINUTES = 5
+PAYMENT_ITEM_NAME       = "NEO PHOTO Photobooth"
+# Price per layout id (config.json "layouts"), Rupiah. "default" = others.
+PAYMENT_PRICES = {
+    "default": 35000,
+    # "grid4":  35000,
+    # "5 Pose": 40000,
+    # "2 Pose": 30000,
+    # "1 Pose": 25000,
+}
+SHOW_MOCK_PAY_BUTTON    = True      # mock mode only
+
+
+class QrisError(RuntimeError):
+    pass
+
+
+class QrisClient:
+    """Midtrans Core API for QRIS (stdlib only), or a mock when no key is set.
+      POST {base}/v2/charge  payment_type=qris -> qr_string / generate-qr-code url
+      GET  {base}/v2/{order_id}/status        -> transaction_status
+      POST {base}/v2/{order_id}/cancel
+      Auth: HTTP Basic, username = server key, empty password."""
+    PAID = {"settlement", "capture"}
+    FAILED = {"expire", "cancel", "deny", "failure"}
+
+    def __init__(self):
+        self.server_key = (MIDTRANS_SERVER_KEY or "").strip()
+        self.production = bool(MIDTRANS_IS_PRODUCTION)
+        self.mock = not self.server_key
+        self.base = ("https://api.midtrans.com" if self.production
+                     else "https://api.sandbox.midtrans.com")
+        self._mock_paid = set()
+        self._lock = threading.Lock()
+        if not self.mock:
+            sb = self.server_key.startswith("SB-")
+            if self.production and sb:
+                LOG.warning("[QRIS] production mode with a sandbox (SB-) key - charges will fail")
+            if not self.production and not sb:
+                LOG.warning("[QRIS] sandbox mode with a production key - charges will fail")
+
+    def _req(self, method, path, body=None, timeout=15):
+        import base64, ssl, urllib.request, urllib.error
+        auth = base64.b64encode(f"{self.server_key}:".encode()).decode()
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method=method, headers={
+            "Accept": "application/json", "Content-Type": "application/json",
+            "Authorization": f"Basic {auth}"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout,
+                                        context=ssl.create_default_context()) as r:
+                out = json.loads(r.read().decode() or "{}")
+        except urllib.error.HTTPError as e:
+            try:
+                out = json.loads(e.read().decode() or "{}")
+            except Exception:
+                raise QrisError(f"HTTP {e.code}") from e
+        except Exception as e:
+            raise QrisError(f"tidak bisa terhubung ke Midtrans ({e})") from e
+        code = str(out.get("status_code", ""))
+        if code and not code.startswith("2") and code != "407":   # 407 = expired
+            raise QrisError(f"{code} {out.get('status_message', '')}".strip())
+        return out
+
+    def charge(self, order_id, amount):
+        amount = int(amount)
+        if self.mock:
+            LOG.info(f"[QRIS] MOCK charge {order_id} Rp{amount}")
+            return {"qr_string": f"MOCK-QRIS|{order_id}|{amount}|BUKAN-PEMBAYARAN-ASLI",
+                    "qr_url": None}
+        out = self._req("POST", "/v2/charge", {
+            "payment_type": "qris",
+            "transaction_details": {"order_id": order_id, "gross_amount": amount},
+            "item_details": [{"id": "session", "price": amount, "quantity": 1,
+                              "name": PAYMENT_ITEM_NAME[:50]}],
+            "qris": {"acquirer": QRIS_ACQUIRER or "gopay"},
+            "custom_expiry": {"expiry_duration": int(PAYMENT_TIMEOUT_MINUTES), "unit": "minute"},
+        })
+        qr_url = next((a.get("url") for a in out.get("actions", [])
+                       if a.get("name") == "generate-qr-code"), None)
+        if not out.get("qr_string") and not qr_url:
+            raise QrisError("respon Midtrans tanpa QR")
+        LOG.info(f"[QRIS] charge {order_id} Rp{amount} -> {out.get('transaction_status')}")
+        return {"qr_string": out.get("qr_string"), "qr_url": qr_url}
+
+    def status(self, order_id):
+        if self.mock:
+            with self._lock:
+                return "settlement" if order_id in self._mock_paid else "pending"
+        return str(self._req("GET", f"/v2/{order_id}/status").get("transaction_status") or "pending")
+
+    def cancel(self, order_id):
+        if self.mock:
+            return
+        try:
+            self._req("POST", f"/v2/{order_id}/cancel")
+            LOG.info(f"[QRIS] cancelled {order_id}")
+        except QrisError as e:
+            LOG.info(f"[QRIS] cancel {order_id}: {e}")
+
+    def mark_mock_paid(self, order_id):
+        with self._lock:
+            self._mock_paid.add(order_id)
+
+
+def _qris_price(layout_def):
+    lid = (layout_def or {}).get("id")
+    return int(PAYMENT_PRICES.get(lid, PAYMENT_PRICES.get("default", 0)) or 0)
+
+
 # ================= SESSION STATS =================
 STATS_FILE = BASE_DIR / "session_stats.json"
 CODES_FILE = BASE_DIR / "codes.json"
@@ -1916,6 +2048,7 @@ class MainWindow(QMainWindow):
         self._build_print_screen()
         self._build_done_screen()
         self._build_code_screen()
+        self._build_payment_screen()
         self._build_pick_screen()
         self.stack.setCurrentIndex(self.SCREEN_HOME)
         self._load_frames()
@@ -2503,7 +2636,10 @@ class MainWindow(QMainWindow):
         # Free mode → skip code. Paid mode → require 9-digit code.
         ac = CONFIG.get("access_code", {}) or {}
         mode = str(ac.get("mode", "free")).lower()
-        if mode == "paid":
+        if PAYMENT_ENABLED and _qris_price(layout_def) > 0:
+            self._session_access_code = None
+            self._goto_payment(layout_def)
+        elif mode == "paid":
             self._goto_code_input()
         else:
             self._session_access_code = None
@@ -3295,6 +3431,253 @@ class MainWindow(QMainWindow):
             self.code_status.setText("Kode tidak valid")
         else:
             self.code_status.setText("Error baca file kode")
+
+    # =============== QRIS PAYMENT SCREEN ===============
+    def _build_payment_screen(self):
+        screen = QWidget()
+        screen.setStyleSheet("background: transparent;")
+        root = QVBoxLayout(screen)
+        root.setContentsMargins(80, 50, 80, 50)
+        root.setSpacing(0)
+        root.addStretch(1)
+        eyebrow = QLabel("PEMBAYARAN")
+        eyebrow.setAlignment(Qt.AlignCenter)
+        eyebrow.setStyleSheet(f"color: {COLORS['pink']}; font-size: 16px; font-weight: 700; "
+                              f"letter-spacing: 10px; background: transparent;")
+        root.addWidget(eyebrow)
+        root.addSpacing(12)
+        title = QLabel("Scan untuk bayar")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 52px; font-weight: 800; "
+                            f"font-family: '{FONT_DISPLAY}'; background: transparent;")
+        root.addWidget(title)
+        root.addSpacing(6)
+        self.pay_sub = QLabel("")
+        self.pay_sub.setAlignment(Qt.AlignCenter)
+        self.pay_sub.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 20px; "
+                                   f"font-weight: 600; background: transparent;")
+        root.addWidget(self.pay_sub)
+        root.addSpacing(4)
+        self.pay_amount = QLabel("")
+        self.pay_amount.setAlignment(Qt.AlignCenter)
+        self.pay_amount.setStyleSheet(f"color: {COLORS['ink']}; font-size: 44px; font-weight: 900; "
+                                      f"font-family: '{FONT_DISPLAY}'; background: transparent;")
+        root.addWidget(self.pay_amount)
+        root.addSpacing(18)
+        self.pay_qr = QLabel("")
+        self.pay_qr.setAlignment(Qt.AlignCenter)
+        self.pay_qr.setFixedSize(380, 380)
+        self.pay_qr.setStyleSheet(f"background: white; border: 4px solid {COLORS['pink_soft']}; "
+                                  f"border-radius: 22px; padding: 14px; color: {COLORS['ink_soft']}; "
+                                  f"font-size: 20px; font-weight: 700;")
+        self._add_shadow(self.pay_qr, blur=30, y_offset=8, alpha=110)
+        root.addWidget(self.pay_qr, 0, Qt.AlignHCenter)
+        root.addSpacing(16)
+        self.pay_status = QLabel("")
+        self.pay_status.setAlignment(Qt.AlignCenter)
+        self.pay_status.setWordWrap(True)
+        self.pay_status.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; "
+                                      f"font-weight: 700; background: transparent;")
+        root.addWidget(self.pay_status)
+        root.addSpacing(4)
+        self.pay_timer_lbl = QLabel("")
+        self.pay_timer_lbl.setAlignment(Qt.AlignCenter)
+        self.pay_timer_lbl.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 22px; "
+                                         f"font-weight: 900; background: transparent;")
+        root.addWidget(self.pay_timer_lbl)
+        root.addSpacing(18)
+        row = QHBoxLayout()
+        row.setSpacing(20)
+        row.addStretch(1)
+        self.btn_pay_cancel = QPushButton("Batal")
+        self.btn_pay_mock = QPushButton("Simulasi lunas (demo)")
+        for b, primary in ((self.btn_pay_cancel, False), (self.btn_pay_mock, True)):
+            b.setFixedHeight(64)
+            b.setMinimumWidth(220)
+            b.setCursor(Qt.PointingHandCursor)
+            if primary:
+                b.setStyleSheet(f"""
+                    QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 {COLORS['pink']}, stop:1 {COLORS['lilac']}); color: white;
+                        border-radius: 32px; font-size: 18px; font-weight: 900; padding: 0 24px; }}""")
+            else:
+                b.setStyleSheet(f"""
+                    QPushButton {{ background: white; color: {COLORS['ink']};
+                        border: 2px solid {COLORS['pink_soft']}; border-radius: 32px;
+                        font-size: 18px; font-weight: 800; padding: 0 24px; }}
+                    QPushButton:hover {{ background: {COLORS['pink_soft']}; }}""")
+            row.addWidget(b)
+        row.addStretch(1)
+        root.addLayout(row)
+        root.addStretch(1)
+        self.btn_pay_cancel.clicked.connect(self._payment_cancel)
+        self.btn_pay_mock.clicked.connect(self._payment_mock_paid)
+        self.stack.addWidget(screen)
+        self.SCREEN_PAYMENT = self.stack.indexOf(screen)
+        self.qris = QrisClient()
+        self._pay_order = None
+        self._pay_token = 0
+        self._pay_polling = False
+        self._payment_info = None
+        self._pay_tick = QTimer(self)
+        self._pay_tick.setInterval(1000)
+        self._pay_tick.timeout.connect(self._payment_tick)
+        LOG.info(f"[QRIS] payment {'ON' if PAYMENT_ENABLED else 'OFF'}, "
+                 f"{'MOCK (no server key)' if self.qris.mock else ('PRODUCTION' if self.qris.production else 'SANDBOX')}")
+
+    def _set_payment_qr(self, text=None, png_bytes=None):
+        """Render the QR from its string (or a downloaded PNG) into the label."""
+        size = self.pay_qr.width() - 36
+        try:
+            if png_bytes is not None:
+                import io
+                img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+            else:
+                import qrcode
+                qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M,
+                                   box_size=10, border=2)
+                qr.add_data(text)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+            img = img.resize((size, size), Image.NEAREST)
+            if self.qris.mock:
+                # Stamp DEMO across the mock QR so nobody tries to pay it.
+                from PIL import ImageDraw
+                d = ImageDraw.Draw(img)
+                band = size // 7
+                d.rectangle([0, (size - band) // 2, size, (size + band) // 2], fill=(240, 80, 138))
+                try:
+                    from PIL import ImageFont
+                    f = ImageFont.load_default(size=int(band * 0.6))
+                except Exception:
+                    f = None
+                d.text((size // 2, size // 2), "DEMO", fill="white", anchor="mm", font=f)
+            data = img.tobytes("raw", "RGB")
+            qimg = QImage(data, img.width, img.height, img.width * 3, QImage.Format_RGB888)
+            self.pay_qr.setPixmap(QPixmap.fromImage(qimg.copy()))
+        except Exception as e:
+            LOG.error(f"[QRIS] QR render failed: {e}")
+            self.pay_qr.setText("QR gagal ditampilkan")
+
+    def _goto_payment(self, layout_def):
+        amount = _qris_price(layout_def)
+        self._pay_token += 1
+        token = self._pay_token
+        self._pay_amount = amount
+        self._pay_order = (f"NEO-{datetime.datetime.now():%Y%m%d%H%M%S}-"
+                           f"{random.randint(0, 0xFFFF):04x}")
+        self._pay_left = int(PAYMENT_TIMEOUT_MINUTES) * 60
+        self._payment_info = None
+        self.pay_sub.setText(layout_def.get("name", ""))
+        self.pay_amount.setText(f"Rp{amount:,}".replace(",", "."))
+        self.pay_qr.clear()
+        self.pay_qr.setText("Menyiapkan QR…")
+        self.pay_status.setText("Bisa dibayar dengan GoPay, OVO, DANA, ShopeePay, LinkAja, "
+                                "atau m-banking yang mendukung QRIS")
+        self.pay_timer_lbl.setText("")
+        self.btn_pay_mock.setVisible(self.qris.mock and SHOW_MOCK_PAY_BUTTON)
+        self.stack.setCurrentIndex(self.SCREEN_PAYMENT)
+        order = self._pay_order
+
+        def _work():
+            try:
+                res = self.qris.charge(order, amount)
+                png = None
+                if not res.get("qr_string") and res.get("qr_url"):
+                    import urllib.request
+                    with urllib.request.urlopen(res["qr_url"], timeout=15) as r:
+                        png = r.read()
+                self._ui(lambda: self._payment_ready(token, res, png))
+            except Exception as e:
+                LOG.error(f"[QRIS] charge failed: {e}")
+                self._ui(lambda e=e: self._payment_failed(token, f"Pembayaran tidak tersedia: {e}"))
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _payment_ready(self, token, res, png):
+        if token != self._pay_token:
+            return
+        self._set_payment_qr(text=res.get("qr_string"), png_bytes=png)
+        if self.qris.mock:
+            self.pay_status.setText("MODE DEMO — QR ini bukan pembayaran asli "
+                                    "(Server Key Midtrans belum diisi)")
+        self._pay_tick.start()
+        self._payment_tick()
+
+    def _payment_tick(self):
+        """Every second: countdown; every 2 s: ask Midtrans for the status."""
+        if self.stack.currentIndex() != self.SCREEN_PAYMENT:
+            self._pay_tick.stop()
+            return
+        self._pay_left -= 1
+        m, s_ = divmod(max(0, self._pay_left), 60)
+        self.pay_timer_lbl.setText(f"Berlaku {m:02d}:{s_:02d}")
+        if self._pay_left <= 0:
+            self._pay_tick.stop()
+            order = self._pay_order
+            threading.Thread(target=lambda: self.qris.cancel(order), daemon=True).start()
+            self._payment_failed(self._pay_token, "Waktu pembayaran habis")
+            return
+        if self._pay_left % 2 == 0 and not self._pay_polling:
+            self._pay_polling = True
+            token, order = self._pay_token, self._pay_order
+
+            def _poll():
+                try:
+                    st = self.qris.status(order)
+                except Exception as e:
+                    LOG.warning(f"[QRIS] status check failed: {e}")
+                    st = None
+                finally:
+                    self._pay_polling = False
+                if st:
+                    self._ui(lambda: self._payment_status(token, st))
+            threading.Thread(target=_poll, daemon=True).start()
+
+    def _payment_status(self, token, st):
+        if token != self._pay_token or self.stack.currentIndex() != self.SCREEN_PAYMENT:
+            return
+        if st in QrisClient.PAID:
+            self._pay_tick.stop()
+            self._payment_info = {"order_id": self._pay_order, "amount": self._pay_amount,
+                                  "mock": self.qris.mock,
+                                  "mode": "mock" if self.qris.mock else
+                                  ("production" if self.qris.production else "sandbox")}
+            LOG.info(f"[QRIS] PAID {self._pay_order} Rp{self._pay_amount}"
+                     + (" (mock)" if self.qris.mock else ""))
+            self.pay_status.setText("Pembayaran diterima. Terima kasih!")
+            self.pay_timer_lbl.setText("")
+            self.btn_pay_mock.hide()
+            self._pay_token += 1          # ignore late poll results
+            QTimer.singleShot(1200, self._start_session)
+        elif st in QrisClient.FAILED:
+            self._pay_tick.stop()
+            self._payment_failed(token, "Pembayaran dibatalkan atau kedaluwarsa")
+
+    def _payment_failed(self, token, msg):
+        if token != self._pay_token:
+            return
+        self._pay_token += 1
+        self._pay_tick.stop()
+        self.pay_qr.clear()
+        self.pay_qr.setText("")
+        self.pay_status.setText(msg)
+        self.pay_timer_lbl.setText("Kembali ke awal…")
+        self.btn_pay_mock.hide()
+        QTimer.singleShot(3500, lambda: (self.stack.currentIndex() == self.SCREEN_PAYMENT)
+                          and self._reset_to_home())
+
+    def _payment_cancel(self):
+        order = self._pay_order
+        self._pay_token += 1
+        self._pay_tick.stop()
+        if order:
+            threading.Thread(target=lambda: self.qris.cancel(order), daemon=True).start()
+        LOG.info(f"[QRIS] cancelled by customer {order}")
+        self._reset_to_home()
+
+    def _payment_mock_paid(self):
+        if self.qris.mock and self._pay_order:
+            self.qris.mark_mock_paid(self._pay_order)
 
     def _goto_code_input(self):
         """Show the code input screen. Called after layout pick."""
@@ -4939,7 +5322,9 @@ class MainWindow(QMainWindow):
                 "shots_total": len(getattr(self, "_pending_all_shots", []) or []),
                 "picked": [i + 1 for i in (getattr(self, "_pending_picked", []) or [])],
                 "copies": getattr(self, "_pending_copies", 1),
+                "payment": getattr(self, "_payment_info", None),
             })
+            self._payment_info = None
             self._last_stats = stats
         except Exception as e:
             LOG.error(f"[STATS] record failed: {e}")
