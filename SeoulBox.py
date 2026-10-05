@@ -1439,6 +1439,11 @@ class GDriveUploader:
                     removed += 1
                     LOG.info(f"[CLEANUP] Drive: removed {f['name']} (created {f.get('createdTime')})")
                 except Exception as e:
+                    status = getattr(getattr(e, "resp", None), "status", None)
+                    if str(status) == "404":
+                        # Another booth sharing this folder already removed it.
+                        LOG.info(f"[CLEANUP] Drive: {f.get('name')} already removed")
+                        continue
                     failed += 1
                     LOG.warning(f"[CLEANUP] Drive: could not remove {f.get('name')}: {e}")
             token = res.get("nextPageToken")
