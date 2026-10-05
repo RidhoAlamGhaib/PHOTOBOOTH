@@ -1,6 +1,7 @@
 """Read paper (media) remaining and status straight from a DNP DS-RX1.
 
-Uses DNP's CyStat.dll (installed with the DS-RX1 driver / SDK), the same
+Uses DNP's CyStat64.dll / CyStat.dll (DS-RX1 SDK; 64-bit Python needs
+CyStat64.dll, shipped next to the app), the same
 library DNP's Rx1Lib wraps:
 
     PortInitialize(char* portName) -> int portNum     e.g. "USB001"
@@ -67,7 +68,10 @@ def _dll_candidates(extra_dir=None):
     dirs += [_app_dir(), os.path.join(_app_dir(), "dnp")]
     win = os.environ.get("SystemRoot", r"C:\Windows")
     dirs += [os.path.join(win, "System32"), os.path.join(win, "SysWOW64")]
-    return [os.path.join(d, "CyStat.dll") for d in dirs]
+    # DNP ships the 64-bit build as CyStat64.dll; prefer the one matching Python.
+    is64 = ctypes.sizeof(ctypes.c_void_p) == 8
+    names = ["CyStat64.dll", "CyStat.dll"] if is64 else ["CyStat.dll"]
+    return [os.path.join(d, n) for d in dirs for n in names]
 
 
 def _printer_port(printer_name):
@@ -134,6 +138,7 @@ class DnpMonitor:
         if sys.platform != "win32":
             raise RuntimeError("DNP status needs Windows")
         tried = []
+        wrong_bits = []
         for path in _dll_candidates(self.dll_dir):
             if not os.path.exists(path):
                 tried.append(path)
@@ -147,9 +152,8 @@ class DnpMonitor:
                 dll = ctypes.WinDLL(path)
             except OSError as e:
                 if getattr(e, "winerror", None) == 193:
-                    raise RuntimeError(
-                        f"{path} is 32-bit but Python is 64-bit (or the other way "
-                        f"round); use the CyStat.dll matching this Python") from e
+                    wrong_bits.append(path)      # e.g. 32-bit CyStat.dll; keep looking
+                    continue
                 raise
             dll.PortInitialize.argtypes = [ctypes.c_char_p]
             dll.PortInitialize.restype = ctypes.c_int
@@ -158,7 +162,11 @@ class DnpMonitor:
                 getattr(dll, fn).restype = ctypes.c_int
             LOG.info(f"[DNP] loaded {path}")
             return dll
-        raise FileNotFoundError("CyStat.dll not found. Looked in:\n  " + "\n  ".join(tried))
+        if wrong_bits:
+            bits = 64 if ctypes.sizeof(ctypes.c_void_p) == 8 else 32
+            raise RuntimeError(f"only wrong-bitness DLLs found ({', '.join(wrong_bits)}); "
+                               f"Python is {bits}-bit - put CyStat64.dll next to the app")
+        raise FileNotFoundError("CyStat64.dll / CyStat.dll not found. Looked in:\n  " + "\n  ".join(tried))
 
     def _connect(self):
         if self._dll is None:

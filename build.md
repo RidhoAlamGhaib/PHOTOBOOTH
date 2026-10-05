@@ -97,6 +97,7 @@ mkdir dist\SeoulBox
 move /Y dist\SeoulBox.exe dist\SeoulBox\
 xcopy /E /I /Y frames dist\SeoulBox\frames
 xcopy /E /I /Y models dist\SeoulBox\models
+copy /Y CyStat64.dll dist\SeoulBox\
 copy /Y config.json dist\SeoulBox\
 ```
 
@@ -108,7 +109,7 @@ Copy these too **if you have them**:
 |---|---|---|
 | `frames\` | Frame overlays per layout | Always |
 | `models\` | Face detector for Spotlight / Big Eyes / Big Head effects | Always (without it those effects fall back to a weaker detector) |
-| `CyStat.dll` | DNP status library: paper left + printer status on the home screen | Only if it isn't already in `C:\Windows\System32` from the DNP driver |
+| `CyStat64.dll` | DNP status library (64-bit): paper left + printer status on the home screen | Always (in the repo) |
 | `config.json` | All settings | Always (if missing, the app writes defaults on first run) |
 | `client_secret.json` | Google OAuth client | Drive upload |
 | `oauth_token.json` | Saved Google login | Optional: skips the first-run browser login |
@@ -163,6 +164,7 @@ if not exist dist\SeoulBox mkdir dist\SeoulBox
 move /Y dist\SeoulBox.exe dist\SeoulBox\ >nul
 xcopy /E /I /Y frames dist\SeoulBox\frames >nul
 xcopy /E /I /Y models dist\SeoulBox\models >nul
+copy /Y CyStat64.dll dist\SeoulBox\ >nul
 if exist config.json         copy /Y config.json         dist\SeoulBox\ >nul
 if exist client_secret.json  copy /Y client_secret.json  dist\SeoulBox\ >nul
 if exist oauth_token.json    copy /Y oauth_token.json    dist\SeoulBox\ >nul
