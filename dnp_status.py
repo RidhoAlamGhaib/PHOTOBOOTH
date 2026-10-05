@@ -85,6 +85,39 @@ def _printer_port(printer_name):
         win32print.ClosePrinter(h)
 
 
+def _language_monitor_check(printer_name):
+    """CyStat talks to the printer through the DS-RX1 driver's language
+    monitor CSJCYLM.DLL (LoadLibrary + MonitorIoControl). Report whether that
+    DLL loads and whether the printer queue is set up to use it."""
+    notes = []
+    try:
+        ctypes.WinDLL("CSJCYLM.DLL")
+        notes.append("CSJCYLM.DLL loads OK")
+    except OSError as e:
+        win = os.environ.get("SystemRoot", r"C:\Windows")
+        here = [p for p in (os.path.join(win, "System32", "CSJCYLM.DLL"),
+                            os.path.join(win, "SysWOW64", "CSJCYLM.DLL"))
+                if os.path.exists(p)]
+        notes.append(f"CSJCYLM.DLL (DNP language monitor) NOT loadable: {e}; "
+                     f"found at: {here or 'nowhere'}")
+    try:
+        import win32print
+        h = win32print.OpenPrinter(printer_name)
+        try:
+            info = win32print.GetPrinter(h, 2)
+            try:
+                mon = win32print.GetPrinterDriver(h, None, 3).get("MonitorName") or "-"
+            except Exception:
+                mon = "?"
+        finally:
+            win32print.ClosePrinter(h)
+        notes.append(f"queue driver={info.get('pDriverName')!r} port={info.get('pPortName')!r} "
+                     f"language monitor={mon!r}")
+    except Exception as e:
+        notes.append(f"queue info unavailable: {e}")
+    return " | ".join(notes)
+
+
 class DnpMonitor:
     def __init__(self, printer_name, dll_dir=None, poll_s=15.0):
         self.printer_name = printer_name
@@ -186,7 +219,8 @@ class DnpMonitor:
         remaining = d.GetMediaCounter(p)
         initial = d.GetInitialMediaCount(p)
         if remaining < 0 and (status & 0x80000000):
-            raise RuntimeError(f"printer not responding (status 0x{status & 0xFFFFFFFF:08X})")
+            raise RuntimeError(f"printer not responding (status 0x{status & 0xFFFFFFFF:08X}); "
+                               + _language_monitor_check(self.printer_name))
         with self._lock:
             self.status = status & 0xFFFFFFFF
             self.remaining = remaining if remaining >= 0 else None
