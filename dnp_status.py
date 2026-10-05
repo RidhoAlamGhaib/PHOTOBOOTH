@@ -4,7 +4,7 @@ Uses DNP's CyStat64.dll / CyStat.dll (DS-RX1 SDK; 64-bit Python needs
 CyStat64.dll, shipped next to the app), the same
 library DNP's Rx1Lib wraps:
 
-    PortInitialize(char* portName) -> int portNum     e.g. "USB001"
+    PortInitialize(wchar_t* portName) -> int portNum  e.g. L"USB001" (1-based)
     GetMediaCounter(int portNum)   -> int  prints left on the roll
     GetInitialMediaCount(int)      -> int  prints on a full roll
     GetStatus(int)                 -> int  status code (see STATUS_TEXT)
@@ -188,7 +188,11 @@ class DnpMonitor:
                     wrong_bits.append(path)      # e.g. 32-bit CyStat.dll; keep looking
                     continue
                 raise
-            dll.PortInitialize.argtypes = [ctypes.c_char_p]
+            # PortInitialize takes a WIDE (UTF-16) port name (disassembly:
+            # word-wise compare, copied into the port table and later passed
+            # to the language monitor's MonitorIoControl). Rx1Lib's ANSI
+            # declaration is wrong for this DLL. Returns a 1-based port number.
+            dll.PortInitialize.argtypes = [ctypes.c_wchar_p]
             dll.PortInitialize.restype = ctypes.c_int
             for fn in ("GetMediaCounter", "GetInitialMediaCount", "GetStatus"):
                 getattr(dll, fn).argtypes = [ctypes.c_int]
@@ -207,7 +211,7 @@ class DnpMonitor:
         port_name = _printer_port(self.printer_name)
         if not port_name:
             raise RuntimeError(f"no port for printer {self.printer_name!r}")
-        port = self._dll.PortInitialize(port_name.encode("ascii", "ignore"))
+        port = self._dll.PortInitialize(port_name)
         if port < 0:
             raise RuntimeError(f"PortInitialize({port_name}) returned {port}")
         self._port = port
