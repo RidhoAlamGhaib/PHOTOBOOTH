@@ -108,6 +108,7 @@ Copy these too **if you have them**:
 |---|---|---|
 | `frames\` | Frame overlays per layout | Always |
 | `models\` | Face detector for Spotlight / Big Eyes / Big Head effects | Always (without it those effects fall back to a weaker detector) |
+| `CyStat.dll` | DNP status library: paper left + printer status on the home screen | Only if it isn't already in `C:\Windows\System32` from the DNP driver |
 | `config.json` | All settings | Always (if missing, the app writes defaults on first run) |
 | `client_secret.json` | Google OAuth client | Drive upload |
 | `oauth_token.json` | Saved Google login | Optional: skips the first-run browser login |

@@ -28,6 +28,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from effects import EFFECT_IDS, EFFECT_LABELS, apply_effect, detect_faces
+import dnp_status
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
@@ -203,6 +204,15 @@ _FALLBACK_DEFAULTS = {
         "dpi":                300,
         # Free "extra print" stepper on the frame screen: 0..max extra copies.
         "max_extra_prints":   3,
+        # Paper left, read from the DNP printer itself (CyStat.dll).
+        "media": {
+            "enabled":          True,
+            "warn_below":       50,    # home screen shows "Kertas tinggal N"
+            "block_when_empty": True,  # disable "Mulai Sesi" when the roll is
+                                       # empty or the printer needs attention
+            "dnp_dll_dir":      "",    # folder with CyStat.dll ("" = search)
+            "poll_s":           15,
+        },
         "other": {
             "printer":     "",
             "paper_w_mm":  100,
@@ -1928,6 +1938,64 @@ class MainWindow(QMainWindow):
         self._cleanup_timer.timeout.connect(self._run_cleanup)
         self._cleanup_timer.start()
         QTimer.singleShot(20000, self._run_cleanup)
+        self.dnp = None
+        self._start_dnp_monitor()
+
+    # ================= PRINTER PAPER / STATUS (DNP) =================
+    def _start_dnp_monitor(self):
+        pcfg = CONFIG.get("printing", {}) or {}
+        mcfg = pcfg.get("media", {}) or {}
+        if not pcfg.get("enabled", True) or not mcfg.get("enabled", True):
+            return
+        if platform.system() != "Windows":
+            return
+        name = (_find_preferred_printer(pcfg.get("printer_non_cut"))
+                or _find_preferred_printer(pcfg.get("printer_cut"))
+                or _find_preferred_printer(pcfg.get("preferred_printer")))
+        if not name:
+            LOG.warning("[DNP] printer not found - paper counter disabled")
+            return
+        self.dnp = dnp_status.DnpMonitor(name, dll_dir=(mcfg.get("dnp_dll_dir") or None),
+                                         poll_s=float(mcfg.get("poll_s", 15)))
+        self.dnp.on_update(lambda _snap: self._ui(self._refresh_media_ui))
+        self.dnp.start()
+
+    # Operator-fixable printer states that make printing impossible.
+    _DNP_BLOCKING = {0x00010008, 0x00010010, 0x00020001, 0x00020002,
+                     0x00020004, 0x00020008, 0x00020020}
+
+    def _refresh_media_ui(self):
+        """Home-screen paper / printer notice; block new sessions when needed."""
+        if not hasattr(self, "media_label"):
+            return
+        mcfg = ((CONFIG.get("printing", {}) or {}).get("media", {}) or {})
+        snap = self.dnp.snapshot() if self.dnp else None
+        txt, bad, blocked = None, False, False
+        if snap and snap["available"]:
+            left, code = snap["remaining"], snap["status"]
+            if code in self._DNP_BLOCKING or (left is not None and left <= 0):
+                txt = ("Kertas habis" if (left is not None and left <= 0)
+                       else snap["status_text"]) + " \u2014 panggil petugas"
+                bad = True
+                blocked = bool(mcfg.get("block_when_empty", True))
+            elif left is not None and left <= int(mcfg.get("warn_below", 50)):
+                txt = f"Kertas tinggal {left} lembar"
+        if txt:
+            color = COLORS["danger"] if bad else COLORS["pink_dk"]
+            self.media_label.setText(txt)
+            self.media_label.setStyleSheet(
+                f"color: white; background: {color}; border-radius: 18px; "
+                f"font-size: 18px; font-weight: 800; padding: 8px 22px;")
+            self.media_label.show()
+        else:
+            self.media_label.hide()
+        self.btn_start.setEnabled(not blocked)
+
+    def _paper_left(self):
+        snap = self.dnp.snapshot() if self.dnp else None
+        if snap and snap["available"] and snap["remaining"] is not None:
+            return snap["remaining"]
+        return None
 
     def _run_cleanup(self):
         """Remove old sessions locally and in Google Drive (background thread)."""
@@ -2109,6 +2177,11 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; "
                            f"font-weight: 600; background: transparent;")
         root.addWidget(hint)
+        root.addSpacing(14)
+        self.media_label = QLabel("")
+        self.media_label.setAlignment(Qt.AlignCenter)
+        self.media_label.hide()
+        root.addWidget(self.media_label, 0, Qt.AlignHCenter)
         root.addStretch(1)
         self.stack.addWidget(screen)
 
@@ -2824,9 +2897,13 @@ class MainWindow(QMainWindow):
         if not pcfg.get("enabled", True):
             return 0
         try:
-            return max(0, int(pcfg.get("max_extra_prints", 0)))
+            n = max(0, int(pcfg.get("max_extra_prints", 0)))
         except (TypeError, ValueError):
             return 0
+        left = self._paper_left() if hasattr(self, "dnp") else None
+        if left is not None:
+            n = min(n, max(0, left - 1))   # keep 1 sheet for the main print
+        return n
 
     def _change_extra_prints(self, delta):
         self.extra_prints = max(0, min(self._max_extra_prints(), self.extra_prints + delta))
@@ -4702,7 +4779,11 @@ class MainWindow(QMainWindow):
                         LOG.info(f"[PRINT] copy {n + 1}/{copies} sent={ok}")
                     except Exception as e:
                         LOG.error(f"[PRINT] copy {n + 1}/{copies} uncaught: {e}")
-            threading.Thread(target=_do_print, daemon=True).start()
+            def _print_then_refresh():
+                _do_print()
+                if self.dnp:
+                    self.dnp.refresh_soon()
+            threading.Thread(target=_print_then_refresh, daemon=True).start()
 
         # ---- Save PNG ----
         # When printing is ENABLED  → save CLEAN (printed copy carries the stamp).
@@ -5028,7 +5109,16 @@ class MainWindow(QMainWindow):
             layout = s.get("layout") or "?"
             lines.append(f"   #{s.get('n')}  {s.get('timestamp')}  [{layout}]")
         log_block = "\n".join(lines) or "   (belum ada sesi)"
+        snap = self.dnp.snapshot() if self.dnp else None
+        if snap and snap["available"]:
+            paper = (f"PRINTER: {snap['status_text']}  \u00b7  kertas sisa "
+                     f"{snap['remaining']} / {snap['initial'] or '?'} lembar\n\n")
+        elif snap:
+            paper = f"PRINTER: status tidak terbaca ({snap['error']})\n\n"
+        else:
+            paper = "PRINTER: pemantau kertas tidak aktif\n\n"
         msg = (
+            paper +
             f"TOTAL SESI: {stats.get('total', 0)}\n\n"
             f"Sesi pertama: {stats.get('first_session', '-')}\n"
             f"Sesi terakhir: {stats.get('last_session', '-')}\n\n"

@@ -78,6 +78,13 @@
     "paper_size": "4x6",
     "dpi": 600,
     "max_extra_prints": 3,
+    "media": {
+      "enabled": true,
+      "warn_below": 50,
+      "block_when_empty": true,
+      "dnp_dll_dir": "",
+      "poll_s": 15
+    },
     "other": {
       "printer": "",
       "paper_w_mm": 100,
