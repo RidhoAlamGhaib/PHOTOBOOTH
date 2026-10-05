@@ -41,6 +41,10 @@ STATUS_TEXT = {
     0x00020020: "Kotak sisa potongan penuh",
     0x00080001: "System error",
 }
+# DNP firmware counters include a 50-print reserve that can't be printed
+# (DS-RX1 reports a full 700-print roll as 750). Subtract it for display.
+MEDIA_RESERVE = 50
+
 READY_CODES = {0x00010001, 0x00010002, 0x00010004, 0x00010020, 0x00010040}
 GROUP_HARDWARE = 0x00040000
 
@@ -227,8 +231,8 @@ class DnpMonitor:
                                + _language_monitor_check(self.printer_name))
         with self._lock:
             self.status = status & 0xFFFFFFFF
-            self.remaining = remaining if remaining >= 0 else None
-            self.initial = initial if initial > 0 else None
+            self.remaining = max(0, remaining - MEDIA_RESERVE) if remaining >= 0 else None
+            self.initial = max(0, initial - MEDIA_RESERVE) if initial > 0 else None
             self.available = True
             self.error = None
             self.updated_at = time.time()
