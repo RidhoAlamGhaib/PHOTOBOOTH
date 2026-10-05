@@ -2103,23 +2103,32 @@ class MainWindow(QMainWindow):
             return
         mcfg = ((CONFIG.get("printing", {}) or {}).get("media", {}) or {})
         snap = self.dnp.snapshot() if self.dnp else None
-        txt, bad, blocked = None, False, False
+        txt, level, blocked = None, "ok", False
         if snap and snap["available"]:
             left, code = snap["remaining"], snap["status"]
+            total = snap["initial"]
+            count = (f"{left}/{total}" if (left is not None and total) else
+                     (str(left) if left is not None else "?"))
             if code in self._DNP_BLOCKING or (left is not None and left <= 0):
                 txt = ("Kertas habis" if (left is not None and left <= 0)
                        else snap["status_text"]) + " \u2014 panggil petugas"
-                bad = True
+                level = "bad"
                 blocked = bool(mcfg.get("block_when_empty", True))
-            elif left is not None and left <= int(mcfg.get("warn_below", 50)):
-                txt = f"Kertas tinggal {left} lembar"
+            else:
+                txt = f"Kertas {count}"
+                if left is not None and left <= int(mcfg.get("warn_below", 50)):
+                    level = "low"
         if txt:
-            color = COLORS["danger"] if bad else COLORS["pink_dk"]
+            bg = {"ok": "rgba(255,255,255,0.85)", "low": COLORS["pink_dk"],
+                  "bad": COLORS["danger"]}[level]
+            fg = COLORS["ink_soft"] if level == "ok" else "white"
             self.media_label.setText(txt)
             self.media_label.setStyleSheet(
-                f"color: white; background: {color}; border-radius: 18px; "
-                f"font-size: 18px; font-weight: 800; padding: 8px 22px;")
+                f"color: {fg}; background: {bg}; border-radius: 14px; "
+                f"font-size: 15px; font-weight: 800; padding: 6px 14px;")
+            self.media_label.adjustSize()
             self.media_label.show()
+            self.media_label.raise_()
         else:
             self.media_label.hide()
         self.btn_start.setEnabled(not blocked)
@@ -2310,12 +2319,11 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; "
                            f"font-weight: 600; background: transparent;")
         root.addWidget(hint)
-        root.addSpacing(14)
-        self.media_label = QLabel("")
-        self.media_label.setAlignment(Qt.AlignCenter)
-        self.media_label.hide()
-        root.addWidget(self.media_label, 0, Qt.AlignHCenter)
         root.addStretch(1)
+        # Paper counter: small pill pinned to the top-left of the home screen.
+        self.media_label = QLabel("", screen)
+        self.media_label.move(24, 24)
+        self.media_label.hide()
         self.stack.addWidget(screen)
 
     @staticmethod
@@ -3576,6 +3584,7 @@ class MainWindow(QMainWindow):
                                 "atau m-banking yang mendukung QRIS")
         self.pay_timer_lbl.setText("")
         self.btn_pay_mock.setVisible(self.qris.mock and SHOW_MOCK_PAY_BUTTON)
+        self.btn_pay_cancel.show()
         self.stack.setCurrentIndex(self.SCREEN_PAYMENT)
         order = self._pay_order
 
@@ -3647,6 +3656,7 @@ class MainWindow(QMainWindow):
             self.pay_status.setText("Pembayaran diterima. Terima kasih!")
             self.pay_timer_lbl.setText("")
             self.btn_pay_mock.hide()
+            self.btn_pay_cancel.hide()
             self._pay_token += 1          # ignore late poll results
             QTimer.singleShot(1200, self._start_session)
         elif st in QrisClient.FAILED:
