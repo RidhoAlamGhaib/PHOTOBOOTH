@@ -137,6 +137,10 @@ _FALLBACK_DEFAULTS = {
     # Auto-enhance every photo (brightness lift for low light + skin warmth +
     # gentle smoothing). 0 = off, 0.5 = subtle (default), 1.0 = medium,
     # up to ~2.0 = strong.
+    # True colour: keep the camera's colours exactly (no live-view colour
+    # match, no skin-tone fix, no beautify). Filters/effects the customer
+    # picks still apply.
+    "true_color":              True,
     "beautify_strength":       0.5,
     "slot_order":              "legacy",
     "camera": {
@@ -1052,6 +1056,10 @@ def crop_center_to_aspect(img_bgr, target_w, target_h, fit_mode="cover", pad_col
         y0 = (h - new_h) // 2
         cropped = img_bgr[y0:y0 + new_h, :]
     return cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+
+def _true_color():
+    return bool(CONFIG.get("true_color", True))
 
 
 def _match_color_to(img_bgr, ref_bgr):
@@ -4000,7 +4008,7 @@ class MainWindow(QMainWindow):
         if sc < 1.0:
             src = cv2.resize(frame, (max(1, int(fw * sc)), max(1, int(fh * sc))),
                              interpolation=cv2.INTER_AREA)
-        bty = float(CONFIG.get("beautify_strength", 0.0))
+        bty = 0.0 if _true_color() else float(CONFIG.get("beautify_strength", 0.0))
         if bty > 0:
             src = beautify(src, bty)
         if flt and flt != "none":
@@ -4362,7 +4370,8 @@ class MainWindow(QMainWindow):
         aspect = float(getattr(self.camera, "target_aspect", 3 / 4) or 3 / 4)
         if CONFIG.get("mirror", True):
             img = cv2.flip(img, 1)   # match the mirrored live view
-        if (CONFIG.get("camera", {}) or {}).get("match_liveview_color", True):
+        if (not _true_color()
+                and (CONFIG.get("camera", {}) or {}).get("match_liveview_color", True)):
             try:
                 img = _match_color_to(img, getattr(self, "_live_color_ref", None))
             except Exception as e:
@@ -4393,7 +4402,8 @@ class MainWindow(QMainWindow):
         self.canon_mode = False
 
     def _show_shot_review(self, frame):
-        if (CONFIG.get("camera", {}) or {}).get("skin_tone_fix", True):
+        if (not _true_color()
+                and (CONFIG.get("camera", {}) or {}).get("skin_tone_fix", True)):
             try:
                 frame = skin_tone_correct(frame)
             except Exception as e:
@@ -4977,7 +4987,7 @@ class MainWindow(QMainWindow):
                 slot_pose_pairs.append((rect, pose_idx))
         canvas = Image.new("RGBA", (ow, oh), (255, 255, 255, 255))
         flt = getattr(self, "current_filter", "none")
-        bty = float(CONFIG.get("beautify_strength", 0.0))
+        bty = 0.0 if _true_color() else float(CONFIG.get("beautify_strength", 0.0))
         if has_transparent_slots:
             masks = _hole_masks(np.array(overlay)[:, :, 3], [r for r, _ in slot_pose_pairs])
             for (rect, pose_idx), mask in zip(slot_pose_pairs, masks):
@@ -5225,7 +5235,7 @@ class MainWindow(QMainWindow):
         # Customer's checkbox on the frame screen (default: config apply_filter).
         styled = bool(getattr(self, "_pending_indiv_fx", icfg.get("apply_filter", True)))
         flt = getattr(self, "_pending_filter", "none") if styled else "none"
-        bty = float(CONFIG.get("beautify_strength", 0.0))
+        bty = 0.0 if _true_color() else float(CONFIG.get("beautify_strength", 0.0))
         quality = int(icfg.get("jpeg_quality", 95))
         out_dir = SAVE_DIR / f"SESSION_{ts}"
 

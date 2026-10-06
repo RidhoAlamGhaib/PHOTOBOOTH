@@ -12,6 +12,7 @@
     "apply_filter": true,
     "jpeg_quality": 100
   },
+  "true_color": true,
   "beautify_strength": 0.01,
   "slot_order": "legacy",
   "camera": {
