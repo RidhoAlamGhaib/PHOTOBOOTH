@@ -366,6 +366,19 @@ PAYMENT_PRICES = {
 }
 SHOW_MOCK_PAY_BUTTON    = True      # mock mode only
 
+# Safer than typing the key above: set it once on the booth PC as a Windows
+# environment variable (nothing in this folder, nothing to push by mistake):
+#   setx NEO_MIDTRANS_SERVER_KEY "Mid-server-..."
+#   setx NEO_MIDTRANS_PRODUCTION 1
+#   setx NEO_MIDTRANS_MERCHANT_ID "G..."
+# then open a NEW command window and start the app. A key typed above wins.
+import os as _os
+if not MIDTRANS_SERVER_KEY:
+    MIDTRANS_SERVER_KEY = _os.environ.get("NEO_MIDTRANS_SERVER_KEY", "").strip()
+    if MIDTRANS_SERVER_KEY:
+        MIDTRANS_IS_PRODUCTION = _os.environ.get("NEO_MIDTRANS_PRODUCTION", "0").strip() in ("1", "true", "True")
+        MIDTRANS_MERCHANT_ID = _os.environ.get("NEO_MIDTRANS_MERCHANT_ID", MIDTRANS_MERCHANT_ID)
+
 
 class QrisError(RuntimeError):
     pass
