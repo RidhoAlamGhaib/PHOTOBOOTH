@@ -3709,6 +3709,7 @@ class MainWindow(QMainWindow):
         self._extras_payment_info = None
         self._bonus_payment_info = None
         self._bonus_paid_n = 0          # bonus photos already paid this session
+        self._bonus_warned = False      # limit popup shown this session
         self._extras_cleared = False
         self._pay_on_paid, self._pay_on_abort, self._pay_kind = None, None, "session"
         self._pay_tick = QTimer(self)
@@ -4390,6 +4391,7 @@ class MainWindow(QMainWindow):
         self.extra_shots = max(0, int(CONFIG.get("extra_shots", 0) or 0))
         self.all_shots = []
         self._bonus_paid_n = 0
+        self._bonus_warned = False
         self.all_clips = []
         self.picked_indices = []
         self.pick_pool = []
@@ -4791,6 +4793,59 @@ class MainWindow(QMainWindow):
         return ("QPushButton { background: rgba(255,255,255,0.92); border: 5px solid transparent; "
                 "border-radius: 18px; } QPushButton:hover { border-color: #FFC2D8; }")
 
+    def _show_popup(self, parent, title, body):
+        """Big centred notice over a screen; tap OK (or wait) to close."""
+        old = getattr(self, "_popup", None)
+        if old is not None:
+            old.deleteLater()
+        dim = QWidget(parent)
+        dim.setAttribute(Qt.WA_StyledBackground, True)
+        dim.setStyleSheet("background: rgba(40, 20, 50, 150);")
+        dim.setGeometry(0, 0, parent.width(), parent.height())
+        box = QWidget(dim)
+        box.setAttribute(Qt.WA_StyledBackground, True)
+        box.setStyleSheet(f"background: white; border: 4px solid {COLORS['pink']}; "
+                          f"border-radius: 32px;")
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(48, 36, 48, 32)
+        lay.setSpacing(18)
+        t = QLabel(title)
+        t.setAlignment(Qt.AlignCenter)
+        t.setWordWrap(True)
+        t.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 38px; font-weight: 800; "
+                        f"font-family: '{FONT_DISPLAY}'; border: none;")
+        b = QLabel(body)
+        b.setAlignment(Qt.AlignCenter)
+        b.setWordWrap(True)
+        b.setStyleSheet(f"color: {COLORS['ink']}; font-size: 24px; font-weight: 600; border: none;")
+        ok = QPushButton("OK, Mengerti")
+        ok.setCursor(Qt.PointingHandCursor)
+        ok.setFixedHeight(72)
+        ok.setStyleSheet(f"""
+            QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                               stop:0 {COLORS['pink']}, stop:1 {COLORS['lilac']});
+                           color: white; border: none; border-radius: 36px;
+                           font-size: 24px; font-weight: 900; padding: 0 48px; }}
+        """)
+        lay.addWidget(t)
+        lay.addWidget(b)
+        lay.addWidget(ok, 0, Qt.AlignHCenter)
+        bw = min(760, parent.width() - 80)
+        box.setFixedWidth(bw)
+        box.setFixedHeight(min(parent.height() - 40, lay.totalHeightForWidth(bw)))
+        box.move((parent.width() - bw) // 2, max(20, (parent.height() - box.height()) // 2))
+
+        def close():
+            if getattr(self, "_popup", None) is dim:
+                self._popup = None
+            dim.deleteLater()
+        ok.clicked.connect(close)
+        QTimer.singleShot(15000, lambda: getattr(self, "_popup", None) is dim and close())
+        self._popup = dim
+        dim.show()
+        dim.raise_()
+        QTimer.singleShot(0, lambda: getattr(self, "_popup", None) is dim and dim.raise_())
+
     def _pick_max(self):
         """Most photos the user may keep. With a bonus price every shot can be
         kept (the ones above the free limit are paid); otherwise poses + bonus."""
@@ -4966,7 +5021,17 @@ class MainWindow(QMainWindow):
             if not self._pick_notice.isVisible():
                 self._pick_notice.show()
                 self._fit_pick_layout()
-            self._pick_notice.raise_()
+            if getattr(self, "_popup", None) is None:
+                self._pick_notice.raise_()
+            if not self._bonus_warned:
+                self._bonus_warned = True
+                bp = _price(self.current_layout, "bonus_price")
+                self._show_popup(
+                    self.pick_screen, "Batas foto gratis terlewati",
+                    f"Paket ini gratis {free} foto.\n"
+                    f"Foto ke-{free + 1} dan seterusnya {_rp(bp)} per foto.\n\n"
+                    f"Pembayaran lewat QRIS setelah tekan Lanjut.\n"
+                    f"Tidak mau bayar? Hapus pilihan sampai {free} foto.")
         else:
             self._pick_notice.hide()
         ready = (N <= k <= M)
@@ -5752,6 +5817,7 @@ class MainWindow(QMainWindow):
         self._pending_moving_clip = None
         self.all_shots = []
         self._bonus_paid_n = 0
+        self._bonus_warned = False
         self.all_clips = []
         self.picked_indices = []
         self.pick_pool = []
