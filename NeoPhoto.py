@@ -473,8 +473,91 @@ class QrisClient:
 
 
 def _qris_price(layout_def):
-    lid = (layout_def or {}).get("id")
+    """Package price: from the online product list, else PAYMENT_PRICES."""
+    layout_def = layout_def or {}
+    if layout_def.get("price") is not None:
+        return int(layout_def.get("price") or 0)
+    lid = layout_def.get("id")
     return int(PAYMENT_PRICES.get(lid, PAYMENT_PRICES.get("default", 0)) or 0)
+
+
+# ================= PRODUCTS (online list from your cPanel domain) =================
+# URL of server/neophoto/products.php uploaded to your hosting, e.g.
+#   "https://namadomainkamu.com/neophoto/products.php"
+# Empty = use "layouts" from config.json like before.
+PRODUCTS_URL = ""
+PRODUCTS_REFRESH_MIN = 10          # re-read the list every N minutes
+PRODUCTS_CACHE = BASE_DIR / "products_cache.json"   # last good list, for offline
+
+
+def _product_to_layout(p, base_by_id):
+    """One row of products.php -> the layout dict the app uses."""
+    pid = str(p.get("id", "")).strip()
+    base = dict(base_by_id.get(pid, {}))
+    poses = int(p.get("poses") or base.get("poses") or 4)
+    lay = base
+    lay.update({
+        "id":                pid,
+        "name":              p.get("name") or base.get("name") or pid,
+        "type":              p.get("type") or "",
+        "poses":             poses,
+        "frame_dir":         p.get("frame_dir") or base.get("frame_dir") or "frames",
+        "cut":               p.get("cut") or base.get("cut") or "none",
+        "price":             int(p.get("price") or 0),
+        "free_photos":       int(p.get("free_photos") or poses),
+        "bonus_price":       int(p.get("bonus_price") or 0),
+        "extra_print_price": int(p.get("extra_print_price") or 0),
+    })
+    if p.get("paper_name"):
+        lay["paper_name"] = p["paper_name"]
+    return lay
+
+
+def fetch_products(timeout=5):
+    """Download the product list. Returns a list of layout dicts or None."""
+    if not PRODUCTS_URL:
+        return None
+    import urllib.request
+    try:
+        req = urllib.request.Request(PRODUCTS_URL, headers={"Accept": "application/json",
+                                                            "User-Agent": "NeoPhoto"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8-sig"))
+        rows = data.get("products", data) if isinstance(data, dict) else data
+        base = {str(l.get("id")): l for l in CONFIG.get("layouts", [])}
+        out = [_product_to_layout(p, base) for p in rows
+               if str(p.get("active", 1)) not in ("0", "false", "False")]
+        if not out:
+            raise ValueError("empty product list")
+        try:
+            PRODUCTS_CACHE.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            LOG.warning(f"[PRODUCTS] cache write failed: {e}")
+        LOG.info(f"[PRODUCTS] {len(out)} product(s) from {PRODUCTS_URL}")
+        return out
+    except Exception as e:
+        LOG.warning(f"[PRODUCTS] could not load {PRODUCTS_URL}: {e}")
+        return None
+
+
+def load_products():
+    """Online list -> last cached list -> config.json layouts."""
+    live = fetch_products()
+    if live:
+        return live
+    if PRODUCTS_URL and PRODUCTS_CACHE.exists():
+        try:
+            cached = json.loads(PRODUCTS_CACHE.read_text(encoding="utf-8"))
+            if cached:
+                LOG.info(f"[PRODUCTS] offline: using cached list ({len(cached)})")
+                return cached
+        except Exception as e:
+            LOG.warning(f"[PRODUCTS] cache unreadable: {e}")
+    return list(CONFIG.get("layouts", []))
+
+
+def _rp(n):
+    return f"Rp{int(n):,}".replace(",", ".")
 
 
 # ================= SESSION STATS =================
@@ -2018,7 +2101,7 @@ class MainWindow(QMainWindow):
         self.session_started     = False
         self.thumbnail_cache     = {}
         self.slot_widgets        = []
-        self.layouts             = list(CONFIG.get("layouts", []))
+        self.layouts             = load_products()
         self.current_layout      = self._resolve_default_layout()
         self.shots_per_session   = self.current_layout.get("poses", 4)
         self.pose_aspects        = [3 / 4] * self.shots_per_session
@@ -2095,6 +2178,40 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(20000, self._run_cleanup)
         self.dnp = None
         self._start_dnp_monitor()
+        if PRODUCTS_URL:
+            self._products_timer = QTimer(self)
+            self._products_timer.setInterval(max(1, int(PRODUCTS_REFRESH_MIN)) * 60 * 1000)
+            self._products_timer.timeout.connect(self._refresh_products)
+            self._products_timer.start()
+
+    def _refresh_products(self):
+        def _work():
+            live = fetch_products()
+            if live:
+                self._ui(lambda: self._apply_products(live))
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _apply_products(self, layouts):
+        """Swap in a new product list (only while nobody is mid-session)."""
+        if self.stack.currentIndex() not in (self.SCREEN_HOME,):
+            return
+        if json.dumps(layouts, sort_keys=True) == json.dumps(self.layouts, sort_keys=True):
+            return
+        self.layouts = layouts
+        while self.layout_strip.count():
+            item = self.layout_strip.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self.layout_buttons = []
+        self._lp_selected_layout = None
+        self.layout_strip.addStretch()
+        for layout_def in self.layouts:
+            card = self._make_layout_card(layout_def)
+            self.layout_strip.addWidget(card)
+            self.layout_buttons.append((card, layout_def))
+        self.layout_strip.addStretch()
+        LOG.info(f"[PRODUCTS] layout list updated ({len(self.layouts)})")
 
     # ================= PRINTER PAPER / STATUS (DNP) =================
     def _start_dnp_monitor(self):
@@ -2503,6 +2620,13 @@ class MainWindow(QMainWindow):
         name.setStyleSheet(f"color: {COLORS['ink']}; font-size: 12px; font-weight: 800; background: transparent;")
         name.setWordWrap(True)
         wrap.addWidget(name)
+        price = _qris_price(layout_def) if PAYMENT_ENABLED else 0
+        if price > 0:
+            pl = QLabel(_rp(price))
+            pl.setAlignment(Qt.AlignCenter)
+            pl.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 13px; font-weight: 900; "
+                             f"background: transparent;")
+            wrap.addWidget(pl)
         check = QLabel("✓", card)
         check.setAlignment(Qt.AlignCenter)
         check.setFixedSize(34, 34)
@@ -3086,7 +3210,9 @@ class MainWindow(QMainWindow):
         self.extra_value.setText(str(self.extra_prints))
         self.btn_extra_minus.setEnabled(self.extra_prints > 0)
         self.btn_extra_plus.setEnabled(self.extra_prints < mx)
-        self.extra_hint.setText(f"total {1 + self.extra_prints} lembar  \u00b7  maks +{mx}")
+        ep = int((self.current_layout or {}).get("extra_print_price") or 0) if PAYMENT_ENABLED else 0
+        price = f"  \u00b7  {_rp(ep)}/lembar" if ep else ""
+        self.extra_hint.setText(f"total {1 + self.extra_prints} lembar  \u00b7  maks +{mx}{price}")
 
     def _style_filter_card(self, btn, selected):
         if selected:
@@ -3552,6 +3678,9 @@ class MainWindow(QMainWindow):
         self._pay_token = 0
         self._pay_polling = False
         self._payment_info = None
+        self._extras_payment_info = None
+        self._extras_cleared = False
+        self._pay_on_paid, self._pay_on_abort, self._pay_kind = None, None, "session"
         self._pay_tick = QTimer(self)
         self._pay_tick.setInterval(1000)
         self._pay_tick.timeout.connect(self._payment_tick)
@@ -3593,16 +3722,23 @@ class MainWindow(QMainWindow):
             self.pay_qr.setText("QR gagal ditampilkan")
 
     def _goto_payment(self, layout_def):
-        amount = _qris_price(layout_def)
+        """Package payment after the layout pick."""
+        self._begin_payment(_qris_price(layout_def), layout_def.get("name", ""),
+                            on_paid=self._start_session, on_abort=self._reset_to_home,
+                            kind="session")
+
+    def _begin_payment(self, amount, subtitle, on_paid, on_abort, kind):
+        self._pay_on_paid, self._pay_on_abort, self._pay_kind = on_paid, on_abort, kind
         self._pay_token += 1
         token = self._pay_token
         self._pay_amount = amount
         self._pay_order = (f"NEO-{datetime.datetime.now():%Y%m%d%H%M%S}-"
                            f"{random.randint(0, 0xFFFF):04x}")
         self._pay_left = int(PAYMENT_TIMEOUT_MINUTES) * 60
-        self._payment_info = None
-        self.pay_sub.setText(layout_def.get("name", ""))
-        self.pay_amount.setText(f"Rp{amount:,}".replace(",", "."))
+        if kind == "session":
+            self._payment_info = None
+        self.pay_sub.setText(subtitle)
+        self.pay_amount.setText(_rp(amount))
         self.pay_qr.clear()
         self.pay_qr.setText("Menyiapkan QR…")
         self.pay_status.setText("Bisa dibayar dengan GoPay, OVO, DANA, ShopeePay, LinkAja, "
@@ -3672,10 +3808,14 @@ class MainWindow(QMainWindow):
             return
         if st in QrisClient.PAID:
             self._pay_tick.stop()
-            self._payment_info = {"order_id": self._pay_order, "amount": self._pay_amount,
-                                  "mock": self.qris.mock,
-                                  "mode": "mock" if self.qris.mock else
-                                  ("production" if self.qris.production else "sandbox")}
+            info = {"order_id": self._pay_order, "amount": self._pay_amount,
+                    "mock": self.qris.mock,
+                    "mode": "mock" if self.qris.mock else
+                    ("production" if self.qris.production else "sandbox")}
+            if self._pay_kind == "extras":
+                self._extras_payment_info = dict(info, detail=self.pay_sub.text())
+            else:
+                self._payment_info = info
             LOG.info(f"[QRIS] PAID {self._pay_order} Rp{self._pay_amount}"
                      + (" (mock)" if self.qris.mock else ""))
             self.pay_status.setText("Pembayaran diterima. Terima kasih!")
@@ -3683,7 +3823,7 @@ class MainWindow(QMainWindow):
             self.btn_pay_mock.hide()
             self.btn_pay_cancel.hide()
             self._pay_token += 1          # ignore late poll results
-            QTimer.singleShot(1200, self._start_session)
+            QTimer.singleShot(1200, self._pay_on_paid)
         elif st in QrisClient.FAILED:
             self._pay_tick.stop()
             self._payment_failed(token, "Pembayaran dibatalkan atau kedaluwarsa")
@@ -3696,10 +3836,11 @@ class MainWindow(QMainWindow):
         self.pay_qr.clear()
         self.pay_qr.setText("")
         self.pay_status.setText(msg)
-        self.pay_timer_lbl.setText("Kembali ke awal…")
+        self.pay_timer_lbl.setText("Kembali ke pilih frame\u2026" if self._pay_kind == "extras"
+                                   else "Kembali ke awal\u2026")
         self.btn_pay_mock.hide()
         QTimer.singleShot(3500, lambda: (self.stack.currentIndex() == self.SCREEN_PAYMENT)
-                          and self._reset_to_home())
+                          and self._pay_on_abort())
 
     def _payment_cancel(self):
         order = self._pay_order
@@ -3708,7 +3849,7 @@ class MainWindow(QMainWindow):
         if order:
             threading.Thread(target=lambda: self.qris.cancel(order), daemon=True).start()
         LOG.info(f"[QRIS] cancelled by customer {order}")
-        self._reset_to_home()
+        self._pay_on_abort()
 
     def _payment_mock_paid(self):
         if self.qris.mock and self._pay_order:
@@ -4621,9 +4762,13 @@ class MainWindow(QMainWindow):
         self._pick_order = kept[:N]
         self._populate_pick_grid()
         rng = f"{N}" if M <= N else f"{N}\u2013{M}"
+        lay = self.current_layout or {}
+        bp = int(lay.get("bonus_price") or 0) if PAYMENT_ENABLED else 0
+        free = int(lay.get("free_photos") or N)
+        bonus_txt = (f"  \u00b7  foto ke-{free + 1} dst {_rp(bp)}/foto" if bp and M > free else "")
         self._pick_sub.setText(
             f"Pilih {rng} dari {len(self.all_shots)} foto  \u00b7  "
-            f"{N} pertama masuk frame, urutan bisa diatur lagi nanti")
+            f"{N} pertama masuk frame{bonus_txt}")
         self.pick_scroll.verticalScrollBar().setValue(0)
         self.stack.setCurrentIndex(self.SCREEN_PICK)
         QTimer.singleShot(0, self._fit_pick_layout)
@@ -5046,7 +5191,44 @@ class MainWindow(QMainWindow):
         return m
 
     # ============= NEW FLOW: PRINT → DONE → BG (BTS + LIVE + UPLOAD) =============
+    def _extras_charge(self):
+        """(amount, description) for bonus photos beyond the package and
+        extra prints, using the selected product's prices."""
+        lay = self.current_layout or {}
+        free = int(lay.get("free_photos") or self.shots_per_session)
+        kept = len(self.pick_pool) if self.pick_pool else self.shots_per_session
+        bonus_n = max(0, kept - free)
+        prints_n = max(0, int(getattr(self, "extra_prints", 0) or 0))
+        bonus = bonus_n * int(lay.get("bonus_price") or 0)
+        prints = prints_n * int(lay.get("extra_print_price") or 0)
+        parts = []
+        if bonus:
+            parts.append(f"{bonus_n} foto bonus")
+        if prints:
+            parts.append(f"{prints_n} cetak tambahan")
+        return bonus + prints, "Tambahan: " + " + ".join(parts)
+
+    def _extras_paid(self):
+        self._extras_cleared = True
+        self._goto_print()
+
+    def _back_to_frames(self):
+        self.stack.setCurrentIndex(self.SCREEN_FRAMES)
+        QTimer.singleShot(0, self._fit_fp_layout)
+
     def _goto_print(self):
+        # Bonus photos / extra prints cost extra: pay that first (QRIS),
+        # then continue. Cancel/timeout returns to the frame screen.
+        if PAYMENT_ENABLED and not self._extras_cleared:
+            amount, desc = self._extras_charge()
+            if amount > 0:
+                self._begin_payment(amount, desc, on_paid=self._extras_paid,
+                                    on_abort=self._back_to_frames, kind="extras")
+                return
+        self._extras_cleared = False
+        self._goto_print_now()
+
+    def _goto_print_now(self):
         """LANJUT from frame picker. New flow:
           1. Build final canvas (in memory)
           2. Show 'Menyiapkan folder...' screen
@@ -5360,8 +5542,10 @@ class MainWindow(QMainWindow):
                 "picked": [i + 1 for i in (getattr(self, "_pending_picked", []) or [])],
                 "copies": getattr(self, "_pending_copies", 1),
                 "payment": getattr(self, "_payment_info", None),
+                "payment_extras": getattr(self, "_extras_payment_info", None),
             })
             self._payment_info = None
+            self._extras_payment_info = None
             self._last_stats = stats
         except Exception as e:
             LOG.error(f"[STATS] record failed: {e}")
