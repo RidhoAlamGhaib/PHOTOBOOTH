@@ -1,2 +1,6 @@
 dist/
 captures/
+build/
+*.spec.bak
+__pycache__/
+products_cache.json
