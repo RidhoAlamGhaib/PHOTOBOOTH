@@ -492,7 +492,10 @@ def _qris_price(layout_def):
 
 
 def _free_photos(layout_def, poses):
-    return _price(layout_def, "free_photos") or int(poses)
+    """Photos a customer may keep for free: the layout's "free_photos", else
+    poses + bonus shots (config "extra_shots")."""
+    return (_price(layout_def, "free_photos")
+            or int(poses) + max(0, int(CONFIG.get("extra_shots", 0) or 0)))
 
 
 # ================= PRODUCTS (online list from your cPanel domain) =================
@@ -3178,6 +3181,7 @@ class MainWindow(QMainWindow):
         ec.addLayout(ec_row)
         self.extra_hint = QLabel("")
         self.extra_hint.setAlignment(Qt.AlignCenter)
+        self.extra_hint.setWordWrap(True)
         self.extra_hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 14px; font-weight: 600; "
                                       f"background: transparent; border: none;")
         ec.addWidget(self.extra_hint)
@@ -3225,8 +3229,18 @@ class MainWindow(QMainWindow):
         self.btn_extra_minus.setEnabled(self.extra_prints > 0)
         self.btn_extra_plus.setEnabled(self.extra_prints < mx)
         ep = _price(self.current_layout, "extra_print_price") if PAYMENT_ENABLED else 0
-        price = f"  \u00b7  {_rp(ep)}/lembar" if ep else ""
-        self.extra_hint.setText(f"total {1 + self.extra_prints} lembar  \u00b7  maks +{mx}{price}")
+        paid = bool(ep and self.extra_prints > 0)
+        if paid:
+            txt = (f"{self.extra_prints} x {_rp(ep)} = {_rp(self.extra_prints * ep)}\n"
+                   f"bayar QRIS setelah Lanjut")
+        else:
+            txt = (f"total {1 + self.extra_prints} lembar  \u00b7  maks +{mx}"
+                   + (f"\n{_rp(ep)}/lembar" if ep else ""))
+        self.extra_hint.setText(txt)
+        self.extra_hint.setStyleSheet(
+            f"color: {COLORS['pink_dk'] if paid else COLORS['ink_soft']}; font-size: "
+            f"{16 if paid else 14}px; font-weight: {800 if paid else 600}; "
+            f"background: transparent; border: none;")
 
     def _style_filter_card(self, btn, selected):
         if selected:
@@ -4285,7 +4299,7 @@ class MainWindow(QMainWindow):
             self.chk_indiv_fx.raise_()
         if hasattr(self, "extra_card"):
             if self._max_extra_prints() > 0:
-                card_h = 176
+                card_h = 216
                 filter_h -= card_h + 14
                 self.extra_card.setGeometry(filter_x, filter_y + filter_h + 14, filter_w, card_h)
                 self.extra_card.show()
@@ -4720,6 +4734,13 @@ class MainWindow(QMainWindow):
         self._pick_sub.setAlignment(Qt.AlignCenter)
         self._pick_sub.setStyleSheet(
             f"color: {COLORS['ink_soft']}; font-size: 20px; font-weight: 500; background: transparent;")
+        self._pick_notice = QLabel("", screen)
+        self._pick_notice.setAlignment(Qt.AlignCenter)
+        self._pick_notice.setWordWrap(True)
+        self._pick_notice.setStyleSheet(
+            f"background: {COLORS['pink']}; color: white; font-size: 20px; font-weight: 800; "
+            f"border: 3px solid white; border-radius: 22px; padding: 4px 18px;")
+        self._pick_notice.hide()
         self._pick_counter = QLabel("", screen)
         self._pick_counter.setAlignment(Qt.AlignCenter)
         self._pick_counter.setStyleSheet(
@@ -4771,9 +4792,21 @@ class MainWindow(QMainWindow):
                 "border-radius: 18px; } QPushButton:hover { border-color: #FFC2D8; }")
 
     def _pick_max(self):
-        """Most photos the user may keep: layout poses + bonus shots."""
+        """Most photos the user may keep. With a bonus price every shot can be
+        kept (the ones above the free limit are paid); otherwise poses + bonus."""
         N = self.shots_per_session
+        if PAYMENT_ENABLED and _price(self.current_layout, "bonus_price") > 0:
+            return len(self.all_shots)
         return min(len(self.all_shots), N + max(0, int(getattr(self, "extra_shots", 0) or 0)))
+
+    def _pick_paid_count(self):
+        """(paid photos, amount) for the current pick, minus already-paid ones."""
+        if not PAYMENT_ENABLED:
+            return 0, 0
+        lay = self.current_layout or {}
+        n = max(0, len(self._pick_order) - _free_photos(lay, self.shots_per_session)
+                - self._bonus_paid_n)
+        return n, n * _price(lay, "bonus_price")
 
     def _goto_pick_screen(self):
         N = self.shots_per_session
@@ -4785,10 +4818,11 @@ class MainWindow(QMainWindow):
         lay = self.current_layout or {}
         bp = _price(lay, "bonus_price") if PAYMENT_ENABLED else 0
         free = _free_photos(lay, N)
-        bonus_txt = (f"  \u00b7  foto ke-{free + 1} dst {_rp(bp)}/foto" if bp and M > free else "")
+        bonus_txt = (f"  \u00b7  gratis {free} foto, foto ke-{free + 1} dst {_rp(bp)}/foto"
+                     if bp and M > free else "")
         self._pick_sub.setText(
-            f"Pilih {rng} dari {len(self.all_shots)} foto  \u00b7  "
-            f"{N} pertama masuk frame{bonus_txt}")
+            f"{N} pertama masuk frame{bonus_txt}" if bonus_txt else
+            f"Pilih {rng} dari {len(self.all_shots)} foto  \u00b7  {N} pertama masuk frame")
         self.pick_scroll.verticalScrollBar().setValue(0)
         self.stack.setCurrentIndex(self.SCREEN_PICK)
         QTimer.singleShot(0, self._fit_pick_layout)
@@ -4850,11 +4884,13 @@ class MainWindow(QMainWindow):
         self.btn_pick_next.resize(280, nav_h)
         self.btn_pick_reset.move(sw // 2 - 240 - 14, nav_y)
         self.btn_pick_next.move(sw // 2 + 14, nav_y)
+        notice_h = max(52, self._pick_notice.heightForWidth(sw - 120) + 6)
+        self._pick_notice.setGeometry(60, nav_y - notice_h - 12, sw - 120, notice_h)
         n = len(self.pick_cards)
         if n == 0:
             return
         top = 200
-        view_h = nav_y - top - 16
+        view_h = nav_y - top - 16 - notice_h - 12
         self.pick_scroll.setGeometry(40, top, sw - 80, view_h)
         bar_w = 16
         avail_w = sw - 80 - bar_w
@@ -4920,6 +4956,19 @@ class MainWindow(QMainWindow):
         M = self._pick_max()
         extra = f"  (maks {M})" if M > N else ""
         self._pick_counter.setText(f"{k} dipilih  \u00b7  min {N}{extra}")
+        paid_n, amount = self._pick_paid_count()
+        if amount > 0:
+            free = _free_photos(self.current_layout, N)
+            self._pick_notice.setText(
+                f"Lewat batas {free} foto gratis: +{paid_n} foto x "
+                f"{_rp(_price(self.current_layout, 'bonus_price'))} = {_rp(amount)}"
+                f"  \u00b7  bayar QRIS setelah Lanjut")
+            if not self._pick_notice.isVisible():
+                self._pick_notice.show()
+                self._fit_pick_layout()
+            self._pick_notice.raise_()
+        else:
+            self._pick_notice.hide()
         ready = (N <= k <= M)
         self.btn_pick_next.setEnabled(ready)
         if ready:
@@ -4960,10 +5009,7 @@ class MainWindow(QMainWindow):
         # Bonus photos (kept above the package's free photos) are paid here,
         # before the frame screen. Only photos not paid for yet are charged.
         if PAYMENT_ENABLED:
-            lay = self.current_layout or {}
-            bonus_n = max(0, len(self._pick_order)
-                          - _free_photos(lay, self.shots_per_session) - self._bonus_paid_n)
-            amount = bonus_n * _price(lay, "bonus_price")
+            bonus_n, amount = self._pick_paid_count()
             if amount > 0:
                 self._begin_payment(amount, f"Foto bonus: {bonus_n} foto",
                                     on_paid=lambda n=bonus_n: self._bonus_paid(n),
