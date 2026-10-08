@@ -97,6 +97,7 @@ mkdir dist\NeoPhoto
 move /Y dist\NeoPhoto.exe dist\NeoPhoto\
 xcopy /E /I /Y frames dist\NeoPhoto\frames
 xcopy /E /I /Y models dist\NeoPhoto\models
+xcopy /E /I /Y fonts dist\NeoPhoto\fonts
 copy /Y CyStat64.dll dist\NeoPhoto\
 copy /Y config.json dist\NeoPhoto\
 ```
@@ -115,7 +116,7 @@ Copy these too **if you have them**:
 | `oauth_token.json` | Saved Google login | Optional: skips the first-run browser login |
 | `codes.json` | Access codes | `access_code.mode = "paid"` |
 | `thank_you.png` / `thank_you.txt` | Uploaded into each guest's folder | Optional |
-| `fonts\` | Poppins / Jua `.ttf` for the full pastel look | Optional |
+| `fonts\` | Fredoka (titles) + Nunito (text) `.ttf` | Yes (without it the app falls back to Segoe UI) |
 | `session_stats.json` | Session counter | Only if you want to keep the old count |
 
 `captures\` and `logs\` are created automatically.
@@ -131,7 +132,7 @@ NeoPhoto\
 ├─ client_secret.json    (optional)
 ├─ frames\
 ├─ models\
-├─ fonts\                (optional)
+├─ fonts\
 ├─ captures\             (auto)
 └─ logs\                 (auto)
 ```
@@ -189,7 +190,7 @@ Run `dist\NeoPhoto\NeoPhoto.exe`, then open the newest `logs\photobooth_YYYYMMDD
 | Frozen mode + right folder | `Frozen: True`, `BASE_DIR: ...\NeoPhoto` |
 | Config loaded | `[CONFIG] OK loaded from ...\config.json` |
 | Canon | `[CAMERA] source=canon`, `[CANON] session opened`, `[CANON] live view -> PC` |
-| Fonts (if added) | `[FONT] ui='Poppins' display='Jua'` |
+| Fonts | `[FONT] ui='Nunito' display='Fredoka'` |
 | Drive | `[GDRIVE] subfolder created: https://drive.google.com/...` |
 | Print | `[PRINT] copy 1/1 sent=True` |
 | Individual photos | `[INDIV] saved 6/6 to ...\captures\SESSION_...` |

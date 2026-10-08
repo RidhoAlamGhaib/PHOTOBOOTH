@@ -731,7 +731,7 @@ COLORS = {
 }
 
 # Resolved by _setup_fonts() once QApplication exists. Drop .ttf/.otf files
-# (e.g. Poppins + Jua from Google Fonts) into fonts/ for the full look.
+# into fonts/ (ships Fredoka for titles + Nunito for text, both OFL).
 FONT_UI = "Segoe UI"
 FONT_DISPLAY = "Segoe UI"
 
@@ -750,8 +750,8 @@ def _setup_fonts(app):
             if n in fams:
                 return n
         return "Segoe UI"
-    FONT_UI = _pick("Poppins", "Nunito", "Quicksand", "Segoe UI")
-    FONT_DISPLAY = _pick("Jua", "Gaegu", "Poppins", "Segoe UI Black", "Segoe UI")
+    FONT_UI = _pick("Nunito", "Poppins", "Quicksand", "Segoe UI")
+    FONT_DISPLAY = _pick("Fredoka", "Jua", "Gaegu", "Poppins", "Segoe UI Black", "Segoe UI")
     app.setFont(QFont(FONT_UI, 11))
     LOG.info(f"[FONT] ui={FONT_UI!r} display={FONT_DISPLAY!r}")
 
