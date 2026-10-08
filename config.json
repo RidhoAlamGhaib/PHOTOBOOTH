@@ -1,9 +1,7 @@
 {
-<<<<<<< HEAD
   "countdown_seconds": 5,
-=======
-  "countdown_seconds": 10,
->>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
+  "camera_warmup_seconds": 5,
+  "mirror": true,
   "max_retakes_per_shot": 2,
   "review_auto_confirm_seconds": 5,
   "shots_per_session": 4,
@@ -12,20 +10,13 @@
     "save": true,
     "upload": true,
     "apply_filter": true,
-<<<<<<< HEAD
     "jpeg_quality": 100
-=======
-    "jpeg_quality": 95
->>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
   },
-  "beautify_strength": 0.5,
+  "true_color": true,
+  "beautify_strength": 0.01,
   "slot_order": "legacy",
   "camera": {
-<<<<<<< HEAD
-    "source": "opencv",
-=======
     "source": "canon",
->>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
     "index": "auto",
     "backend": "any",
     "width": "auto",
@@ -34,73 +25,50 @@
     "edsdk_dll_dir": "",
     "canon_max_long_side": 3000,
     "canon_use_af": true,
-    "canon_fail_timeout_s": 30
+    "canon_fail_timeout_s": 30,
+    "match_liveview_color": true
   },
   "camera_index": null,
+  "pricing": {
+    "price": 35000,
+    "free_photos": 0,
+    "bonus_price": 5000,
+    "extra_print_price": 10000
+  },
   "layouts": [
     {
       "id": "grid4",
       "name": "4 Foto — Grid 2×2",
       "paper": "4x6 portrait",
       "poses": 4,
+      "frame_dir": "frames/ad",
+      "cut": "none"
+    },
+    {
+      "id": "5 Pose",
+      "name": "5 FOTO, Beda dari yang lain",
+      "poses": 5,
       "frame_dir": "frames/a",
       "cut": "none"
     },
     {
-      "id": "8dup",
-      "name": "8 Foto — Strip dgn Duplikat (CUT)",
-      "poses": 8,
-      "frame_dir": "frames/ST8dup",
-      "slot_to_pose": [
-        0,
-        0,
-        1,
-        1,
-        2,
-        2,
-        3,
-        3
-      ],
-      "cut": "2inch",
-      "paper_name": "PR (2x6)*2"
+      "id": "2 Pose",
+      "name": "2 Pose Besar",
+      "poses": 2,
+      "frame_dir": "frames/b",
+      "cut": "none"
     },
     {
-      "id": "8poseCut",
-      "name": "8 Foto — Strip dgn Duplikat (CUT)",
-      "poses": 8,
-      "frame_dir": "frames/ST8dup",
-      "slot_to_pose": [
-        0,
-        4,
-        1,
-        5,
-        2,
-        6,
-        3,
-        7
-      ],
-      "cut": "2inch",
-      "paper_name": "PR (2x6)*2"
-    },
-    {
-      "id": "strip6",
-      "name": "6 Foto Landscape (CUT)",
-      "poses": 6,
-      "frame_dir": "frames/ST6dup",
-      "cut": "2inch",
-      "paper_name": "PR (2x6)*2"
-    },
-    {
-      "id": "test",
-      "name": "3 Foto",
-      "poses": 3,
-      "frame_dir": "frames/test",
+      "id": "1 Pose",
+      "name": "1 Pose 1 Memori",
+      "poses": 1,
+      "frame_dir": "frames/c",
       "cut": "none"
     }
   ],
   "default_layout_id": "grid4",
   "video_fps": 25,
-  "bts_speed": 0.8,
+  "bts_speed": 1,
   "bts_max_duration_s": 30.0,
   "moving_clip_s": 3.0,
   "moving_speed": 1.0,
@@ -109,18 +77,22 @@
   "print_bar_step": 2,
   "print_tick_ms": 40,
   "printing": {
-<<<<<<< HEAD
-    "enabled": false,
-=======
     "enabled": true,
->>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
     "mode": "DSRX",
     "printer_cut": "ds-rx1-1 (cut)",
     "printer_non_cut": "ds-rx1-1 (non_cut)",
     "preferred_printer": "",
     "paper_size": "4x6",
-    "dpi": 300,
+    "dpi": 600,
     "max_extra_prints": 3,
+    "media": {
+      "enabled": true,
+      "warn_below": 50,
+      "block_when_empty": true,
+      "printer_name": "DS-RX1",
+      "dnp_dll_dir": "",
+      "poll_s": 15
+    },
     "other": {
       "printer": "",
       "paper_w_mm": 100,
@@ -134,17 +106,13 @@
   "gdrive": {
     "enabled": true,
     "event_name": "Wedding-Event",
-<<<<<<< HEAD
-    "folder_id": "15WbipR4AXzEND20CVlLO7YKXCa3mJtno",
-=======
-    "folder_id": "PASTE_YOUR_FOLDER_ID_HERE",
->>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
+    "folder_id": "1DzegRklKYX3LLsk02HKrjL8WzikGyiFy",
     "client_secrets_path": "client_secret.json",
     "token_path": "oauth_token.json"
   },
   "stamp": {
     "qr_size_pct": 0.06,
-    "qr_position": "bottom-left",
+    "qr_position": "top-left",
     "password_position": "bottom-right",
     "password_font_pct": 0.02,
     "qr_inset_x_pct": 0.03,
@@ -154,6 +122,13 @@
   },
   "access_code": {
     "mode": "free"
+  },
+  "cleanup": {
+    "enabled": true,
+    "drive_days": 30,
+    "drive_permanent_delete": true,
+    "local_days": 30,
+    "logs_days": 60
   },
   "ui": {
     "studio_name": "NEO PHOTO STUDIO",

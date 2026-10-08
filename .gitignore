@@ -1,7 +1,9 @@
 dist/
 captures/
-<<<<<<< HEAD
+build/
+*.spec.bak
+__pycache__/
+products_cache.json
+logs/*.log
 client_secret.json
 oauth_token.json
-=======
->>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d

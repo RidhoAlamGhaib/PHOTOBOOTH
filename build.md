@@ -1,6 +1,6 @@
-# Building SeoulBox.exe
+# Building NeoPhoto.exe
 
-How to turn `SeoulBox.py` into a Windows app folder you can copy to the booth PC.
+How to turn `NeoPhoto.py` into a Windows app folder you can copy to the booth PC.
 Uses **PyInstaller** in *one-folder* mode.
 
 ---
@@ -40,7 +40,7 @@ What each one is for:
 Check that the app runs from this venv **before** building:
 
 ```bat
-python SeoulBox.py
+python NeoPhoto.py
 ```
 
 ## 3. Build
@@ -48,7 +48,7 @@ python SeoulBox.py
 Run from the `photobooth` folder with the venv active:
 
 ```bat
-pyinstaller --noconfirm --onefile --clean --windowed --name SeoulBox --add-data "EDSDK\Dll;EDSDK\Dll" --hidden-import canon_edsdk --hidden-import win32print --hidden-import win32ui --hidden-import win32con --collect-data googleapiclient --exclude-module tkinter SeoulBox.py
+pyinstaller --noconfirm --onefile --clean --windowed --name NeoPhoto --add-data "EDSDK\Dll;EDSDK\Dll" --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status --hidden-import win32print --hidden-import win32ui --hidden-import win32con --collect-data googleapiclient --exclude-module tkinter NeoPhoto.py
 ```
 
 Camera-only test exe (keeps the console so you can read its output):
@@ -70,9 +70,9 @@ Why each flag:
 
 Optional: add `--icon app.ico` for a custom exe icon.
 
-Output with `--onefile`: a single `dist\SeoulBox.exe`. Put it in its own folder on the booth PC
-(e.g. `C:\SeoulBox\`) together with the runtime files from step 4.
-Without `--onefile` you get `dist\SeoulBox\SeoulBox.exe` + an `_internal\` folder; ship that whole folder.
+Output with `--onefile`: a single `dist\NeoPhoto.exe`. Put it in its own folder on the booth PC
+(e.g. `C:\NeoPhoto\`) together with the runtime files from step 4.
+Without `--onefile` you get `dist\NeoPhoto\NeoPhoto.exe` + an `_internal\` folder; ship that whole folder.
 
 > `--onefile` trade-off: the exe unpacks itself to a temp `_MEIxxxx` folder on every launch, so it
 > starts a few seconds slower. Leave out `--onefile` if start-up time matters on the kiosk.
@@ -89,29 +89,34 @@ the exe's folder. If nothing is found, the error lists every folder it searched.
 
 ## 4. Copy the runtime files next to the exe
 
-When frozen, the app reads and writes everything **next to `SeoulBox.exe`**, not inside the bundle.
+When frozen, the app reads and writes everything **next to `NeoPhoto.exe`**, not inside the bundle.
 Don't bundle these with `--add-data`; copy them after building. For `--onefile` (exe lands in `dist\`):
 
 ```bat
-mkdir dist\SeoulBox
-move /Y dist\SeoulBox.exe dist\SeoulBox\
-xcopy /E /I /Y frames dist\SeoulBox\frames
-copy /Y config.json dist\SeoulBox\
+mkdir dist\NeoPhoto
+move /Y dist\NeoPhoto.exe dist\NeoPhoto\
+xcopy /E /I /Y frames dist\NeoPhoto\frames
+xcopy /E /I /Y models dist\NeoPhoto\models
+xcopy /E /I /Y fonts dist\NeoPhoto\fonts
+copy /Y CyStat64.dll dist\NeoPhoto\
+copy /Y config.json dist\NeoPhoto\
 ```
 
-(Without `--onefile` the exe is already in `dist\SeoulBox\`; skip the first two lines.)
+(Without `--onefile` the exe is already in `dist\NeoPhoto\`; skip the first two lines.)
 
 Copy these too **if you have them**:
 
 | File / folder | What it does | Needed when |
 |---|---|---|
 | `frames\` | Frame overlays per layout | Always |
+| `models\` | Face detector for Spotlight / Big Eyes / Big Head effects | Always (without it those effects fall back to a weaker detector) |
+| `CyStat64.dll` | DNP status library (64-bit): paper left + printer status on the home screen | Always (in the repo) |
 | `config.json` | All settings | Always (if missing, the app writes defaults on first run) |
 | `client_secret.json` | Google OAuth client | Drive upload |
 | `oauth_token.json` | Saved Google login | Optional: skips the first-run browser login |
 | `codes.json` | Access codes | `access_code.mode = "paid"` |
 | `thank_you.png` / `thank_you.txt` | Uploaded into each guest's folder | Optional |
-| `fonts\` | Poppins / Jua `.ttf` for the full pastel look | Optional |
+| `fonts\` | Fredoka (titles) + Nunito (text) `.ttf` | Yes (without it the app falls back to Segoe UI) |
 | `session_stats.json` | Session counter | Only if you want to keep the old count |
 
 `captures\` and `logs\` are created automatically.
@@ -119,14 +124,15 @@ Copy these too **if you have them**:
 Final layout on the booth PC:
 
 ```
-SeoulBox\
-├─ SeoulBox.exe
+NeoPhoto\
+├─ NeoPhoto.exe
 ├─ _internal\            <- only without --onefile (don't touch)
 ├─ EDSDK.dll, EdsImage.dll  <- only if you didn't bundle them with --add-data
 ├─ config.json
 ├─ client_secret.json    (optional)
 ├─ frames\
-├─ fonts\                (optional)
+├─ models\
+├─ fonts\
 ├─ captures\             (auto)
 └─ logs\                 (auto)
 ```
@@ -144,45 +150,47 @@ if not exist .venv-build\Scripts\activate.bat (
   exit /b 1
 )
 call .venv-build\Scripts\activate.bat
-pyinstaller --noconfirm --onefile --clean --windowed --name SeoulBox ^
+pyinstaller --noconfirm --onefile --clean --windowed --name NeoPhoto ^
   --add-data "EDSDK\Dll;EDSDK\Dll" ^
-  --hidden-import canon_edsdk ^
+  --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status ^
   --hidden-import win32print --hidden-import win32ui --hidden-import win32con ^
   --collect-data googleapiclient ^
   --exclude-module tkinter ^
-  SeoulBox.py
+  NeoPhoto.py
 if errorlevel 1 (
   pause
   exit /b 1
 )
-if not exist dist\SeoulBox mkdir dist\SeoulBox
-move /Y dist\SeoulBox.exe dist\SeoulBox\ >nul
-xcopy /E /I /Y frames dist\SeoulBox\frames >nul
-if exist config.json         copy /Y config.json         dist\SeoulBox\ >nul
-if exist client_secret.json  copy /Y client_secret.json  dist\SeoulBox\ >nul
-if exist oauth_token.json    copy /Y oauth_token.json    dist\SeoulBox\ >nul
-if exist codes.json          copy /Y codes.json          dist\SeoulBox\ >nul
-if exist thank_you.png       copy /Y thank_you.png       dist\SeoulBox\ >nul
-if exist thank_you.txt       copy /Y thank_you.txt       dist\SeoulBox\ >nul
-if exist fonts               xcopy /E /I /Y fonts dist\SeoulBox\fonts >nul
+if not exist dist\NeoPhoto mkdir dist\NeoPhoto
+move /Y dist\NeoPhoto.exe dist\NeoPhoto\ >nul
+xcopy /E /I /Y frames dist\NeoPhoto\frames >nul
+xcopy /E /I /Y models dist\NeoPhoto\models >nul
+copy /Y CyStat64.dll dist\NeoPhoto\ >nul
+if exist config.json         copy /Y config.json         dist\NeoPhoto\ >nul
+if exist client_secret.json  copy /Y client_secret.json  dist\NeoPhoto\ >nul
+if exist oauth_token.json    copy /Y oauth_token.json    dist\NeoPhoto\ >nul
+if exist codes.json          copy /Y codes.json          dist\NeoPhoto\ >nul
+if exist thank_you.png       copy /Y thank_you.png       dist\NeoPhoto\ >nul
+if exist thank_you.txt       copy /Y thank_you.txt       dist\NeoPhoto\ >nul
+if exist fonts               xcopy /E /I /Y fonts dist\NeoPhoto\fonts >nul
 echo.
-echo Done: dist\SeoulBox\SeoulBox.exe
+echo Done: dist\NeoPhoto\NeoPhoto.exe
 pause
 ```
 
-Note: each run replaces `dist\SeoulBox\SeoulBox.exe` and re-copies the files above.
-`captures\` and `logs\` inside `dist\SeoulBox\` are kept.
+Note: each run replaces `dist\NeoPhoto\NeoPhoto.exe` and re-copies the files above.
+`captures\` and `logs\` inside `dist\NeoPhoto\` are kept.
 
 ## 6. Test the build (before the event)
 
-Run `dist\SeoulBox\SeoulBox.exe`, then open the newest `logs\photobooth_YYYYMMDD.log`:
+Run `dist\NeoPhoto\NeoPhoto.exe`, then open the newest `logs\photobooth_YYYYMMDD.log`:
 
 | Check | Log line you want |
 |---|---|
-| Frozen mode + right folder | `Frozen: True`, `BASE_DIR: ...\SeoulBox` |
+| Frozen mode + right folder | `Frozen: True`, `BASE_DIR: ...\NeoPhoto` |
 | Config loaded | `[CONFIG] OK loaded from ...\config.json` |
 | Canon | `[CAMERA] source=canon`, `[CANON] session opened`, `[CANON] live view -> PC` |
-| Fonts (if added) | `[FONT] ui='Poppins' display='Jua'` |
+| Fonts | `[FONT] ui='Nunito' display='Fredoka'` |
 | Drive | `[GDRIVE] subfolder created: https://drive.google.com/...` |
 | Print | `[PRINT] copy 1/1 sent=True` |
 | Individual photos | `[INDIV] saved 6/6 to ...\captures\SESSION_...` |
@@ -202,14 +210,14 @@ Keys: `Esc` closes the app, `F12` shows session stats.
 | `DLL load failed` for EDSDK | Install the **Microsoft Visual C++ 2015-2022 Redistributable (x64)** on the booth PC. |
 | `[CAMERA] Canon EDSDK init FAILED`, then webcam fallback | Read the traceback in the log. Also close EOS Utility / EOS Webcam Utility. |
 | `UnknownApiNameOrVersion: drive v3` | Rebuild with `--collect-data googleapiclient`. |
-| `OAuth client secrets not found` | Copy `client_secret.json` next to `SeoulBox.exe`. |
+| `OAuth client secrets not found` | Copy `client_secret.json` next to `NeoPhoto.exe`. |
 | `[PRINT] pywin32 not available` | `pip install pywin32` in the build venv, then rebuild. |
 | App starts then closes instantly, no window | Check `logs\` for `Uncaught exception`. For a visible console while debugging, rebuild without `--windowed`. |
-| Antivirus / SmartScreen blocks the exe | Common false positive for PyInstaller apps. Allow the `SeoulBox` folder in Windows Security, or code-sign the exe. |
-| Frames missing / "(no frame)" | `frames\` (and each layout's `frame_dir`) must sit next to `SeoulBox.exe`. |
+| Antivirus / SmartScreen blocks the exe | Common false positive for PyInstaller apps. Allow the `NeoPhoto` folder in Windows Security, or code-sign the exe. |
+| Frames missing / "(no frame)" | `frames\` (and each layout's `frame_dir`) must sit next to `NeoPhoto.exe`. |
 
 ## 8. Updating later
 
-- Code change (`SeoulBox.py`, `canon_edsdk.py`): rebuild, then replace `SeoulBox.exe` (plus
+- Code change (`NeoPhoto.py`, `canon_edsdk.py`): rebuild, then replace `NeoPhoto.exe` (plus
   `_internal\` if you build without `--onefile`) on the booth PC. Keep its `config.json`, `captures\`, `logs\` and `oauth_token.json`.
 - Settings, frames or fonts only: no rebuild needed. Edit or copy the files next to the exe.
