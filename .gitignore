@@ -5,3 +5,5 @@ build/
 __pycache__/
 products_cache.json
 logs/*.log
+client_secret.json
+oauth_token.json
