@@ -29,6 +29,12 @@
     "match_liveview_color": true
   },
   "camera_index": null,
+  "pricing": {
+    "price": 35000,
+    "free_photos": 0,
+    "bonus_price": 5000,
+    "extra_print_price": 10000
+  },
   "layouts": [
     {
       "id": "grid4",

@@ -168,6 +168,14 @@ _FALLBACK_DEFAULTS = {
         "skin_tone_fix": True,
     },
     "camera_index":            None,
+    # Prices (Rupiah). Each layout in "layouts" can override any of these
+    # with its own "price", "free_photos", "bonus_price", "extra_print_price".
+    "pricing": {
+        "price":             35000,  # package price (QRIS before the session)
+        "free_photos":       0,      # kept photos included; 0 = same as poses
+        "bonus_price":       5000,   # per kept photo above free_photos
+        "extra_print_price": 10000,  # per extra printed copy
+    },
     "layouts": [
        {
       "id": "grid4",
@@ -356,14 +364,7 @@ MIDTRANS_MERCHANT_ID    = "G265312901"
 QRIS_ACQUIRER           = "gopay"
 PAYMENT_TIMEOUT_MINUTES = 5
 PAYMENT_ITEM_NAME       = "NEO PHOTO Photobooth"
-# Price per layout id (config.json "layouts"), Rupiah. "default" = others.
-PAYMENT_PRICES = {
-    "default": 35000,
-    # "grid4":  35000,
-    # "5 Pose": 40000,
-    # "2 Pose": 30000,
-    # "1 Pose": 25000,
-}
+# Prices live in config.json: "pricing" (defaults) + per-layout overrides.
 SHOW_MOCK_PAY_BUTTON    = True      # mock mode only
 
 # Safer than typing the key above: set it once on the booth PC as a Windows
@@ -472,13 +473,26 @@ class QrisClient:
             self._mock_paid.add(order_id)
 
 
-def _qris_price(layout_def):
-    """Package price: from the online product list, else PAYMENT_PRICES."""
+def _price(layout_def, key):
+    """Price setting for a layout: the layout's own value from config.json
+    "layouts" (or the product list), else config.json "pricing"."""
     layout_def = layout_def or {}
-    if layout_def.get("price") is not None:
-        return int(layout_def.get("price") or 0)
-    lid = layout_def.get("id")
-    return int(PAYMENT_PRICES.get(lid, PAYMENT_PRICES.get("default", 0)) or 0)
+    v = layout_def.get(key)
+    if v is None or v == "":
+        v = (CONFIG.get("pricing", {}) or {}).get(key, 0)
+    try:
+        return max(0, int(v or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _qris_price(layout_def):
+    """Package price for this layout."""
+    return _price(layout_def, "price")
+
+
+def _free_photos(layout_def, poses):
+    return _price(layout_def, "free_photos") or int(poses)
 
 
 # ================= PRODUCTS (online list from your cPanel domain) =================
@@ -3210,7 +3224,7 @@ class MainWindow(QMainWindow):
         self.extra_value.setText(str(self.extra_prints))
         self.btn_extra_minus.setEnabled(self.extra_prints > 0)
         self.btn_extra_plus.setEnabled(self.extra_prints < mx)
-        ep = int((self.current_layout or {}).get("extra_print_price") or 0) if PAYMENT_ENABLED else 0
+        ep = _price(self.current_layout, "extra_print_price") if PAYMENT_ENABLED else 0
         price = f"  \u00b7  {_rp(ep)}/lembar" if ep else ""
         self.extra_hint.setText(f"total {1 + self.extra_prints} lembar  \u00b7  maks +{mx}{price}")
 
@@ -4763,8 +4777,8 @@ class MainWindow(QMainWindow):
         self._populate_pick_grid()
         rng = f"{N}" if M <= N else f"{N}\u2013{M}"
         lay = self.current_layout or {}
-        bp = int(lay.get("bonus_price") or 0) if PAYMENT_ENABLED else 0
-        free = int(lay.get("free_photos") or N)
+        bp = _price(lay, "bonus_price") if PAYMENT_ENABLED else 0
+        free = _free_photos(lay, N)
         bonus_txt = (f"  \u00b7  foto ke-{free + 1} dst {_rp(bp)}/foto" if bp and M > free else "")
         self._pick_sub.setText(
             f"Pilih {rng} dari {len(self.all_shots)} foto  \u00b7  "
@@ -5195,12 +5209,12 @@ class MainWindow(QMainWindow):
         """(amount, description) for bonus photos beyond the package and
         extra prints, using the selected product's prices."""
         lay = self.current_layout or {}
-        free = int(lay.get("free_photos") or self.shots_per_session)
+        free = _free_photos(lay, self.shots_per_session)
         kept = len(self.pick_pool) if self.pick_pool else self.shots_per_session
         bonus_n = max(0, kept - free)
         prints_n = max(0, int(getattr(self, "extra_prints", 0) or 0))
-        bonus = bonus_n * int(lay.get("bonus_price") or 0)
-        prints = prints_n * int(lay.get("extra_print_price") or 0)
+        bonus = bonus_n * _price(lay, "bonus_price")
+        prints = prints_n * _price(lay, "extra_print_price")
         parts = []
         if bonus:
             parts.append(f"{bonus_n} foto bonus")
