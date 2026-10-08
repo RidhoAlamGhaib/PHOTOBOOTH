@@ -3693,6 +3693,8 @@ class MainWindow(QMainWindow):
         self._pay_polling = False
         self._payment_info = None
         self._extras_payment_info = None
+        self._bonus_payment_info = None
+        self._bonus_paid_n = 0          # bonus photos already paid this session
         self._extras_cleared = False
         self._pay_on_paid, self._pay_on_abort, self._pay_kind = None, None, "session"
         self._pay_tick = QTimer(self)
@@ -3828,6 +3830,8 @@ class MainWindow(QMainWindow):
                     ("production" if self.qris.production else "sandbox")}
             if self._pay_kind == "extras":
                 self._extras_payment_info = dict(info, detail=self.pay_sub.text())
+            elif self._pay_kind == "bonus":
+                self._bonus_payment_info = dict(info, detail=self.pay_sub.text())
             else:
                 self._payment_info = info
             LOG.info(f"[QRIS] PAID {self._pay_order} Rp{self._pay_amount}"
@@ -3850,8 +3854,9 @@ class MainWindow(QMainWindow):
         self.pay_qr.clear()
         self.pay_qr.setText("")
         self.pay_status.setText(msg)
-        self.pay_timer_lbl.setText("Kembali ke pilih frame\u2026" if self._pay_kind == "extras"
-                                   else "Kembali ke awal\u2026")
+        self.pay_timer_lbl.setText({"extras": "Kembali ke pilih frame\u2026",
+                                    "bonus": "Kembali ke pilih foto\u2026"}
+                                   .get(self._pay_kind, "Kembali ke awal\u2026"))
         self.btn_pay_mock.hide()
         QTimer.singleShot(3500, lambda: (self.stack.currentIndex() == self.SCREEN_PAYMENT)
                           and self._pay_on_abort())
@@ -4370,6 +4375,7 @@ class MainWindow(QMainWindow):
     def _start_session(self):
         self.extra_shots = max(0, int(CONFIG.get("extra_shots", 0) or 0))
         self.all_shots = []
+        self._bonus_paid_n = 0
         self.all_clips = []
         self.picked_indices = []
         self.pick_pool = []
@@ -4951,6 +4957,29 @@ class MainWindow(QMainWindow):
     def _confirm_pick(self):
         if not (self.shots_per_session <= len(self._pick_order) <= self._pick_max()):
             return
+        # Bonus photos (kept above the package's free photos) are paid here,
+        # before the frame screen. Only photos not paid for yet are charged.
+        if PAYMENT_ENABLED:
+            lay = self.current_layout or {}
+            bonus_n = max(0, len(self._pick_order)
+                          - _free_photos(lay, self.shots_per_session) - self._bonus_paid_n)
+            amount = bonus_n * _price(lay, "bonus_price")
+            if amount > 0:
+                self._begin_payment(amount, f"Foto bonus: {bonus_n} foto",
+                                    on_paid=lambda n=bonus_n: self._bonus_paid(n),
+                                    on_abort=self._back_to_pick, kind="bonus")
+                return
+        self._confirm_pick_now()
+
+    def _bonus_paid(self, n):
+        self._bonus_paid_n += n
+        self._confirm_pick_now()
+
+    def _back_to_pick(self):
+        self.stack.setCurrentIndex(self.SCREEN_PICK)
+        QTimer.singleShot(0, self._fit_pick_layout)
+
+    def _confirm_pick_now(self):
         self.pick_pool = list(self._pick_order)
         self._apply_pool_order()
         LOG.info(f"[PICK] kept shots {[i + 1 for i in self.pick_pool]} of {len(self.all_shots)}")
@@ -5206,21 +5235,11 @@ class MainWindow(QMainWindow):
 
     # ============= NEW FLOW: PRINT → DONE → BG (BTS + LIVE + UPLOAD) =============
     def _extras_charge(self):
-        """(amount, description) for bonus photos beyond the package and
-        extra prints, using the selected product's prices."""
-        lay = self.current_layout or {}
-        free = _free_photos(lay, self.shots_per_session)
-        kept = len(self.pick_pool) if self.pick_pool else self.shots_per_session
-        bonus_n = max(0, kept - free)
+        """(amount, description) for extra printed copies (bonus photos are
+        paid separately on the pick screen)."""
         prints_n = max(0, int(getattr(self, "extra_prints", 0) or 0))
-        bonus = bonus_n * _price(lay, "bonus_price")
-        prints = prints_n * _price(lay, "extra_print_price")
-        parts = []
-        if bonus:
-            parts.append(f"{bonus_n} foto bonus")
-        if prints:
-            parts.append(f"{prints_n} cetak tambahan")
-        return bonus + prints, "Tambahan: " + " + ".join(parts)
+        return prints_n * _price(self.current_layout, "extra_print_price"), \
+            f"Cetak tambahan: {prints_n} lembar"
 
     def _extras_paid(self):
         self._extras_cleared = True
@@ -5231,7 +5250,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._fit_fp_layout)
 
     def _goto_print(self):
-        # Bonus photos / extra prints cost extra: pay that first (QRIS),
+        # Extra prints cost extra: pay that first (QRIS),
         # then continue. Cancel/timeout returns to the frame screen.
         if PAYMENT_ENABLED and not self._extras_cleared:
             amount, desc = self._extras_charge()
@@ -5556,9 +5575,11 @@ class MainWindow(QMainWindow):
                 "picked": [i + 1 for i in (getattr(self, "_pending_picked", []) or [])],
                 "copies": getattr(self, "_pending_copies", 1),
                 "payment": getattr(self, "_payment_info", None),
+                "payment_bonus": getattr(self, "_bonus_payment_info", None),
                 "payment_extras": getattr(self, "_extras_payment_info", None),
             })
             self._payment_info = None
+            self._bonus_payment_info = None
             self._extras_payment_info = None
             self._last_stats = stats
         except Exception as e:
@@ -5684,6 +5705,7 @@ class MainWindow(QMainWindow):
         self.moving_clips = [None] * self.shots_per_session
         self._pending_moving_clip = None
         self.all_shots = []
+        self._bonus_paid_n = 0
         self.all_clips = []
         self.picked_indices = []
         self.pick_pool = []
