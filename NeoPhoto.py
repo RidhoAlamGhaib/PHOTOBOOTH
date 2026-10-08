@@ -4793,7 +4793,7 @@ class MainWindow(QMainWindow):
         return ("QPushButton { background: rgba(255,255,255,0.92); border: 5px solid transparent; "
                 "border-radius: 18px; } QPushButton:hover { border-color: #FFC2D8; }")
 
-    def _show_popup(self, parent, title, body):
+    def _show_popup(self, parent, title, body, button="OK"):
         """Big centred notice over a screen; tap OK (or wait) to close."""
         old = getattr(self, "_popup", None)
         if old is not None:
@@ -4818,7 +4818,7 @@ class MainWindow(QMainWindow):
         b.setAlignment(Qt.AlignCenter)
         b.setWordWrap(True)
         b.setStyleSheet(f"color: {COLORS['ink']}; font-size: 24px; font-weight: 600; border: none;")
-        ok = QPushButton("OK, Mengerti")
+        ok = QPushButton(button)
         ok.setCursor(Qt.PointingHandCursor)
         ok.setFixedHeight(72)
         ok.setStyleSheet(f"""
@@ -5015,7 +5015,7 @@ class MainWindow(QMainWindow):
         if amount > 0:
             free = _free_photos(self.current_layout, N)
             self._pick_notice.setText(
-                f"Lewat batas {free} foto gratis: +{paid_n} foto x "
+                f"Foto tambahan: {paid_n} x "
                 f"{_rp(_price(self.current_layout, 'bonus_price'))} = {_rp(amount)}"
                 f"  \u00b7  bayar QRIS setelah Lanjut")
             if not self._pick_notice.isVisible():
@@ -5027,11 +5027,12 @@ class MainWindow(QMainWindow):
                 self._bonus_warned = True
                 bp = _price(self.current_layout, "bonus_price")
                 self._show_popup(
-                    self.pick_screen, "Batas foto gratis terlewati",
-                    f"Paket ini gratis {free} foto.\n"
-                    f"Foto ke-{free + 1} dan seterusnya {_rp(bp)} per foto.\n\n"
-                    f"Pembayaran lewat QRIS setelah tekan Lanjut.\n"
-                    f"Tidak mau bayar? Hapus pilihan sampai {free} foto.")
+                    self.pick_screen, "Wah, fotonya cakep semua ya, Kak!",
+                    f"Paket Kakak sudah termasuk {free} foto.\n"
+                    f"Mau simpan lebih banyak? Bisa banget!\n"
+                    f"Foto ke-{free + 1} dan seterusnya cukup {_rp(bp)} per foto.\n\n"
+                    f"Pembayarannya pakai QRIS setelah tekan Lanjut ya.",
+                    button="Oke, lanjut pilih")
         else:
             self._pick_notice.hide()
         ready = (N <= k <= M)
