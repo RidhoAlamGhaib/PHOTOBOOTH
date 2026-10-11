@@ -1,7 +1,10 @@
 <?php
-// Booth -> website: one photobooth session per POST (JSON), written into the
-// existing tables: customers -> orders -> order_items (-> order_item_addons).
-// The same session_id sent twice is stored once (orders.`order-UC`).
+// Booth -> website: photobooth session (JSON POST), written into the existing
+// tables: customers -> orders -> order_items (-> order_item_addons).
+// The booth sends each session twice with the same session_id (orders.`order-UC`):
+//   stage "paid": right after payment (customer, package, amount)
+//   stage "done": after printing (frame, sheets, bonus photos, extra prints, total)
+// The second one updates the same order instead of adding a new one.
 require __DIR__ . '/booth_config.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -39,6 +42,7 @@ $extra = $int('extra_prints');
 
 // Everything the existing columns have no place for.
 $meta = [
+    'stage' => $str('stage', 10) ?: 'done',
     'booth' => $str('booth_name', 60), 'layout_id' => $str('layout_id', 60),
     'layout_name' => $str('layout_name', 120), 'frame' => $str('frame', 120),
     'filter' => $str('filter', 40), 'shots_total' => $int('shots_total'),
@@ -51,9 +55,15 @@ $meta = [
 
 try {
     $pdo = db();
-    $st = $pdo->prepare('SELECT id FROM orders WHERE `order-UC` = ? LIMIT 1');
+    $st = $pdo->prepare('SELECT id, customer_id, booth_data FROM orders WHERE `order-UC` = ? LIMIT 1');
     $st->execute([$sid]);
-    if ($row = $st->fetch()) out(200, ['ok' => true, 'order_id' => (int)$row['id'], 'duplicate' => true]);
+    $existing = $st->fetch() ?: null;
+    if ($existing && $meta['stage'] === 'paid') {
+        $old = json_decode($existing['booth_data'] ?? '', true);
+        if (($old['stage'] ?? '') === 'done') {      // late "paid" resend: keep the final data
+            out(200, ['ok' => true, 'order_id' => (int)$existing['id'], 'duplicate' => true]);
+        }
+    }
 
     if ($productId > 0) {
         $st = $pdo->prepare('SELECT id FROM products WHERE id = ?');
@@ -76,6 +86,7 @@ try {
         $st->execute([$telp]);
         $custId = $st->fetchColumn() ?: null;
     }
+    if (!$custId && $existing) $custId = (int)$existing['customer_id'];   // second post, no phone
     if ($custId) {
         $pdo->prepare('UPDATE customers SET name = COALESCE(NULLIF(?, \'\'), name),
                          email = COALESCE(NULLIF(?, \'\'), email),
@@ -90,19 +101,37 @@ try {
         $custId = (int)$pdo->lastInsertId();
     }
 
-    $pdo->prepare('INSERT INTO orders (customer_id, status, `order-UC`, apprcode, total, outlet,
-                                       booth_data, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        ->execute([$custId, BOOTH_ORDER_STATUS, $sid, $str('order_ids', 255) ?: null,
-                   (string)$int('amount_total'), mb_substr($meta['booth'], 0, 25, 'UTF-8') ?: null,
-                   json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $at, $at]);
-    $orderId = (int)$pdo->lastInsertId();
+    $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $outlet = mb_substr($meta['booth'], 0, 25, 'UTF-8') ?: null;
+    $now = date('Y-m-d H:i:s');
+    if ($existing) {
+        $orderId = (int)$existing['id'];
+        $pdo->prepare('UPDATE orders SET customer_id = ?, status = ?, apprcode = ?, total = ?,
+                              outlet = ?, booth_data = ?, updated_at = ? WHERE id = ?')
+            ->execute([$custId, BOOTH_ORDER_STATUS, $str('order_ids', 255) ?: null,
+                       (string)$int('amount_total'), $outlet, $metaJson, $now, $orderId]);
+    } else {
+        $pdo->prepare('INSERT INTO orders (customer_id, status, `order-UC`, apprcode, total, outlet,
+                                           booth_data, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$custId, BOOTH_ORDER_STATUS, $sid, $str('order_ids', 255) ?: null,
+                       (string)$int('amount_total'), $outlet, $metaJson, $at, $at]);
+        $orderId = (int)$pdo->lastInsertId();
+    }
 
     if ($productId > 0) {
-        $pdo->prepare('INSERT INTO order_items (order_id, product_id, printCount, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?)')
-            ->execute([$orderId, $productId, $prints, $at, $at]);
-        $itemId = (int)$pdo->lastInsertId();
+        $st = $pdo->prepare('SELECT id FROM order_items WHERE order_id = ? ORDER BY id LIMIT 1');
+        $st->execute([$orderId]);
+        if ($itemId = (int)$st->fetchColumn()) {
+            $pdo->prepare('UPDATE order_items SET product_id = ?, printCount = ?, updated_at = ? WHERE id = ?')
+                ->execute([$productId, $prints, $now, $itemId]);
+            $pdo->prepare('DELETE FROM order_item_addons WHERE order_item_id = ?')->execute([$itemId]);
+        } else {
+            $pdo->prepare('INSERT INTO order_items (order_id, product_id, printCount, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?)')
+                ->execute([$orderId, $productId, $prints, $at, $at]);
+            $itemId = (int)$pdo->lastInsertId();
+        }
         $addon = $pdo->prepare('INSERT INTO order_item_addons (order_item_id, addon_id, qty, created_at, updated_at)
                                 VALUES (?, ?, ?, ?, ?)');
         if ($bonus > 0 && $addonOk(ADDON_BONUS_PHOTO_PRODUCT_ID)) {

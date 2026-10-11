@@ -1,13 +1,20 @@
 # NEO PHOTO booth → website database
 
-The booth app sends one record per finished session to `booth_session.php`, which writes it
-into the existing Laravel tables:
+Booth flow: pick layout → contact form → pay (QRIS) → **saved here** → photos → print.
+
+The booth posts each session to `booth_session.php` twice, with the same session id:
+
+1. **right after payment**: customer, package, amount paid (cancelled payments are never saved);
+2. **after printing**: frame, filter, sheets, bonus photos, extra prints and the final total.
+   This updates the same order; it does not add a second one.
+
+Where it lands in the existing Laravel tables:
 
 | Booth data | Table / column |
 |---|---|
 | Nama, Telpon, Email, IG | `customers.name`, `telp`, `email`, `instagram` (same phone = same customer, details refreshed) |
 | Centang promo | `customers.promo_optin` (new column) |
-| Session id | `orders.order-UC` (unique, so a resend is stored once) |
+| Session id | `orders.order-UC` (unique: one order per session) |
 | Total paid (paket + foto bonus + cetak tambahan) | `orders.total` |
 | Midtrans order ids | `orders.apprcode` |
 | Machine name (`booth_name` in config.json) | `orders.outlet` (max 25 chars) |

@@ -2983,7 +2983,16 @@ class MainWindow(QMainWindow):
             FRAME_DIR = new_frame_dir
         self._load_frames()
         self._detect_layout_slot_aspects()
-        # Free mode → skip code. Paid mode → require 9-digit code.
+        # Layout -> contact form -> payment / code -> saved online -> photos.
+        self._customer = {}
+        if (CONFIG.get("customer_form", {}) or {}).get("enabled", True):
+            self._goto_contact_form()
+        else:
+            self._access_gate()
+
+    def _access_gate(self):
+        """Payment (QRIS), 9-digit code or free start for the chosen layout."""
+        layout_def = self.current_layout or {}
         ac = CONFIG.get("access_code", {}) or {}
         mode = str(ac.get("mode", "free")).lower()
         if PAYMENT_ENABLED and _qris_price(layout_def) > 0:
@@ -2993,7 +3002,19 @@ class MainWindow(QMainWindow):
             self._goto_code_input()
         else:
             self._session_access_code = None
-            self._after_access()
+            self._access_done()
+
+    def _access_done(self):
+        """Paid (or code / free): save the session online now, then the photos."""
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        event_name = ((_load_gdrive_config().get("event_name") or "Session")
+                      .strip().replace(" ", "-"))
+        self._session_id = f"{event_name}-{ts}-{random.randint(0, 0xFFFF):04x}"
+        try:
+            queue_session_upload(self._session_db_record("paid"))
+        except Exception as e:
+            LOG.error(f"[DB] session record failed: {e}")
+        self._start_session()
 
     def _detect_layout_slot_aspects(self):
         N = self.shots_per_session
@@ -3787,7 +3808,7 @@ class MainWindow(QMainWindow):
             self.code_status.setText(" ")
             # Save which code was used for the session log.
             self._session_access_code = entered
-            QTimer.singleShot(200, self._after_access)
+            QTimer.singleShot(200, self._access_done)
         elif result == "used":
             self.code_status.setText("Kode sudah pernah dipakai")
         elif result == "invalid":
@@ -4024,7 +4045,23 @@ class MainWindow(QMainWindow):
                            font-size: 24px; font-weight: 900; }}""")
         self._add_shadow(self.btn_cf_next, blur=18, y_offset=4, alpha=110)
         self.btn_cf_next.clicked.connect(self._contact_submit)
-        root.addWidget(self.btn_cf_next, 0, Qt.AlignHCenter)
+        self.btn_cf_back = QPushButton("Kembali")
+        self.btn_cf_back.setFixedSize(220, 70)
+        self.btn_cf_back.setCursor(Qt.PointingHandCursor)
+        self.btn_cf_back.setFocusPolicy(Qt.NoFocus)
+        self.btn_cf_back.setStyleSheet(f"""
+            QPushButton {{ background: white; color: {COLORS['ink']};
+                           border: 2px solid {COLORS['pink_soft']}; border-radius: 35px;
+                           font-size: 22px; font-weight: 800; }}""")
+        self.btn_cf_back.clicked.connect(
+            lambda: self._goto_layout_picker() if len(self.layouts or []) > 1 else self._reset_to_home())
+        nav = QHBoxLayout()
+        nav.setSpacing(28)
+        nav.addStretch(1)
+        nav.addWidget(self.btn_cf_back)
+        nav.addWidget(self.btn_cf_next)
+        nav.addStretch(1)
+        root.addLayout(nav)
         root.addStretch(1)
         self.stack.addWidget(screen)
         self.SCREEN_CONTACT = self.stack.indexOf(screen)
@@ -4041,14 +4078,6 @@ class MainWindow(QMainWindow):
     def _contact_required(self):
         cfg = CONFIG.get("customer_form", {}) or {}
         return set(cfg.get("required", ["name", "phone"]) or [])
-
-    def _after_access(self):
-        """Payment / code / free start done: contact form, then the photos."""
-        if (CONFIG.get("customer_form", {}) or {}).get("enabled", True):
-            self._goto_contact_form()
-        else:
-            self._customer = {}
-            self._start_session()
 
     def _goto_contact_form(self):
         req = self._contact_required()
@@ -4093,25 +4122,36 @@ class MainWindow(QMainWindow):
         v["promo_optin"] = self.cf_promo.isChecked()
         self._customer = v
         LOG.info(f"[CONTACT] form filled (promo={'yes' if v['promo_optin'] else 'no'})")
-        self._start_session()
+        self._access_gate()
 
-    def _session_db_record(self):
-        """Everything about the finished session for the online database."""
-        cust = getattr(self, "_pending_customer", {}) or {}
-        lay = getattr(self, "_pending_layout", None) or {}
-        pkg = getattr(self, "_pending_pay", {}) or {}
+    def _session_db_record(self, stage="done"):
+        """Session data for the online database. "paid": right after payment
+        (customer, package, amount). "done": after printing, with frame,
+        sheets, bonus photos and extras; the server updates the same row."""
+        if stage == "paid":
+            cust = getattr(self, "_customer", {}) or {}
+            lay = self.current_layout or {}
+            pkg = {"package": getattr(self, "_payment_info", None)}
+            access_code = getattr(self, "_session_access_code", None)
+        else:
+            cust = getattr(self, "_pending_customer", {}) or {}
+            lay = getattr(self, "_pending_layout", None) or {}
+            pkg = getattr(self, "_pending_pay", {}) or {}
+            access_code = getattr(self, "_pending_access_code", None)
         amounts = {k: int((pkg.get(k) or {}).get("amount") or 0) for k in ("package", "bonus", "extras")}
         orders = [str((pkg.get(k) or {}).get("order_id")) for k in ("package", "bonus", "extras")
                   if (pkg.get(k) or {}).get("order_id")]
         if pkg.get("package"):
             mode = pkg["package"].get("mode") or ""
-        elif getattr(self, "_pending_access_code", None):
+        elif access_code:
             mode = "code"
         else:
             mode = "free"
-        copies = int(getattr(self, "_pending_copies", 1) or 1)
+        done = stage != "paid"
+        copies = int(getattr(self, "_pending_copies", 1) or 1) if done else 1
         return {
             "session_id":     getattr(self, "_session_id", None),
+            "stage":          stage,
             "booth_name":     str(CONFIG.get("booth_name", "") or ""),
             "created_at":     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "customer_name":  cust.get("name", ""),
@@ -4122,11 +4162,11 @@ class MainWindow(QMainWindow):
             "product_id":     int(lay.get("product_id") or 0),
             "layout_id":      str(lay.get("id", "")),
             "layout_name":    str(lay.get("name", "")),
-            "frame":          getattr(self, "_pending_frame", "") or "",
-            "filter":         getattr(self, "_pending_filter", "") or "",
-            "shots_total":    len(getattr(self, "_pending_all_shots", []) or []),
-            "photos_kept":    len(getattr(self, "_pending_picked", []) or []),
-            "bonus_photos":   int(getattr(self, "_pending_bonus_n", 0) or 0),
+            "frame":          (getattr(self, "_pending_frame", "") or "") if done else "",
+            "filter":         (getattr(self, "_pending_filter", "") or "") if done else "",
+            "shots_total":    len(getattr(self, "_pending_all_shots", []) or []) if done else 0,
+            "photos_kept":    len(getattr(self, "_pending_picked", []) or []) if done else 0,
+            "bonus_photos":   int(getattr(self, "_pending_bonus_n", 0) or 0) if done else 0,
             "prints":         copies,
             "extra_prints":   max(0, copies - 1),
             "amount_package": amounts["package"],
@@ -4135,13 +4175,13 @@ class MainWindow(QMainWindow):
             "amount_total":   sum(amounts.values()),
             "payment_mode":   mode,
             "order_ids":      ",".join(orders),
-            "folder_url":     getattr(self, "_pending_folder_url", None) or "",
+            "folder_url":     (getattr(self, "_pending_folder_url", None) or "") if done else "",
         }
 
     def _goto_payment(self, layout_def):
         """Package payment after the layout pick."""
         self._begin_payment(_qris_price(layout_def), layout_def.get("name", ""),
-                            on_paid=self._after_access, on_abort=self._reset_to_home,
+                            on_paid=self._access_done, on_abort=self._reset_to_home,
                             kind="session")
 
     def _begin_payment(self, amount, subtitle, on_paid, on_abort, kind):
@@ -5794,7 +5834,8 @@ class MainWindow(QMainWindow):
         rand_suffix = f"{random.randint(0, 0xFFFF):04x}"
         gd_cfg = _load_gdrive_config()
         event_name = (gd_cfg.get("event_name") or "Session").strip().replace(" ", "-")
-        self._session_id = f"{event_name}-{ts}-{rand_suffix}"
+        if not getattr(self, "_session_id", None):     # normally set right after payment
+            self._session_id = f"{event_name}-{ts}-{rand_suffix}"
 
         self._pending_ts = ts
         self._pending_layout = dict(self.current_layout) if self.current_layout else None
@@ -6091,7 +6132,7 @@ class MainWindow(QMainWindow):
             LOG.error(f"[STATS] record failed: {e}")
             stats = None
         try:
-            queue_session_upload(self._session_db_record())
+            queue_session_upload(self._session_db_record("done"))
         except Exception as e:
             LOG.error(f"[DB] session record failed: {e}")
         self._customer = {}
@@ -6205,6 +6246,7 @@ class MainWindow(QMainWindow):
 
     def _reset_to_home(self):
         self._customer = {}
+        self._session_id = None
         self.is_reviewing = False
         self.is_reviewing_final = False
         self.session_started = False
