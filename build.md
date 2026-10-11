@@ -138,53 +138,17 @@ NeoPhoto\
 └─ logs\                 (auto)
 ```
 
-## 5. One-click rebuild (optional)
+## 5. One-click rebuild: `build.bat`
 
-Save this as `build.bat` in the `photobooth` folder and double-click it:
+`build.bat` is in the repo. Double-click it (or run `.\build.bat` in PowerShell; it runs in
+CMD, so the PowerShell script policy doesn't matter). It checks that `.venv-build` has every
+package, builds, and copies the runtime files into `dist\NeoPhoto\`.
 
-```bat
-@echo off
-cd /d "%~dp0"
-if not exist .venv-build\Scripts\activate.bat (
-  echo Create .venv-build first - see build.md
-  pause
-  exit /b 1
-)
-call .venv-build\Scripts\activate.bat
-pyinstaller --noconfirm --onefile --clean --windowed --name NeoPhoto ^
-  --add-data "EDSDK\Dll;EDSDK\Dll" ^
-  --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status ^
-  --hidden-import win32print --hidden-import win32ui --hidden-import win32con ^
-  --hidden-import qrcode --hidden-import truststore --hidden-import certifi ^
-  --hidden-import google.oauth2.credentials --hidden-import google_auth_oauthlib.flow ^
-  --hidden-import google.auth.transport.requests ^
-  --hidden-import googleapiclient.discovery --hidden-import googleapiclient.http ^
-  --collect-data googleapiclient --collect-data certifi ^
-  --exclude-module tkinter ^
-  NeoPhoto.py
-if errorlevel 1 (
-  pause
-  exit /b 1
-)
-if not exist dist\NeoPhoto mkdir dist\NeoPhoto
-move /Y dist\NeoPhoto.exe dist\NeoPhoto\ >nul
-xcopy /E /I /Y frames dist\NeoPhoto\frames >nul
-xcopy /E /I /Y models dist\NeoPhoto\models >nul
-copy /Y CyStat64.dll dist\NeoPhoto\ >nul
-if exist config.json         copy /Y config.json         dist\NeoPhoto\ >nul
-if exist client_secret.json  copy /Y client_secret.json  dist\NeoPhoto\ >nul
-if exist oauth_token.json    copy /Y oauth_token.json    dist\NeoPhoto\ >nul
-if exist codes.json          copy /Y codes.json          dist\NeoPhoto\ >nul
-if exist thank_you.png       copy /Y thank_you.png       dist\NeoPhoto\ >nul
-if exist thank_you.txt       copy /Y thank_you.txt       dist\NeoPhoto\ >nul
-if exist fonts               xcopy /E /I /Y fonts dist\NeoPhoto\fonts >nul
-echo.
-echo Done: dist\NeoPhoto\NeoPhoto.exe
-pause
-```
+`config.json` and `oauth_token.json` are copied only if `dist\NeoPhoto\` doesn't have them
+yet, so settings you made there survive a rebuild. `captures\` and `logs\` are kept too.
 
-Note: each run replaces `dist\NeoPhoto\NeoPhoto.exe` and re-copies the files above.
-`captures\` and `logs\` inside `dist\NeoPhoto\` are kept.
+PowerShell says "running scripts is disabled" for `activate`? You don't need it: call
+`.venv-build\Scripts\python.exe -m pip ...` directly, as `build.bat` does.
 
 ## 6. Test the build (before the event)
 
