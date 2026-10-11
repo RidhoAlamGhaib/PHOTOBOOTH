@@ -1,4 +1,7 @@
 <?php
+// Booth times are WIB; keep the server's own timestamps in WIB too.
+date_default_timezone_set('Asia/Jakarta');
+
 // Fill in on the server only (cPanel > File Manager > Edit). Never commit real values.
 // Same database as the Laravel site (see its .env: DB_DATABASE / DB_USERNAME / DB_PASSWORD).
 const DB_HOST = 'localhost';
@@ -13,11 +16,6 @@ const BOOTH_API_KEY = '';
 
 // orders.status for a session uploaded by a booth.
 const BOOTH_ORDER_STATUS = 'paid';
-
-// products.id used as order_item_addons.addon_id. 0 = don't write that add-on row
-// (the amounts are still in orders.total and orders.booth_data).
-const ADDON_BONUS_PHOTO_PRODUCT_ID = 0;
-const ADDON_EXTRA_PRINT_PRODUCT_ID = 0;
 
 function db(): PDO {
     static $pdo = null;

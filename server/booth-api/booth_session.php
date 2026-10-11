@@ -1,6 +1,7 @@
 <?php
 // Booth -> website: photobooth session (JSON POST), written into the existing
-// tables: customers -> orders -> order_items (-> order_item_addons).
+// tables: customers -> orders -> order_items. Bonus photos and extra prints are
+// columns on orders (see migration.sql).
 // The booth sends each session twice with the same session_id (orders.`order-UC`):
 //   stage "paid": right after payment (customer, package, amount)
 //   stage "done": after printing (frame, sheets, bonus photos, extra prints, total)
@@ -70,12 +71,6 @@ try {
         $st->execute([$productId]);
         if (!$st->fetch()) out(422, ['error' => "product_id $productId not in products"]);
     }
-    $addonOk = function ($id) use ($pdo) {
-        if ($id <= 0) return false;
-        $st = $pdo->prepare('SELECT id FROM products WHERE id = ?');
-        $st->execute([$id]);
-        return (bool)$st->fetch();
-    };
 
     $pdo->beginTransaction();
 
@@ -107,15 +102,19 @@ try {
     if ($existing) {
         $orderId = (int)$existing['id'];
         $pdo->prepare('UPDATE orders SET customer_id = ?, status = ?, apprcode = ?, total = ?,
-                              outlet = ?, booth_data = ?, updated_at = ? WHERE id = ?')
+                              outlet = ?, bonus_photos = ?, bonus_amount = ?, extra_prints = ?,
+                              extra_amount = ?, booth_data = ?, updated_at = ? WHERE id = ?')
             ->execute([$custId, BOOTH_ORDER_STATUS, $str('order_ids', 255) ?: null,
-                       (string)$int('amount_total'), $outlet, $metaJson, $now, $orderId]);
+                       (string)$int('amount_total'), $outlet, $bonus, $int('amount_bonus'),
+                       $extra, $int('amount_extras'), $metaJson, $now, $orderId]);
     } else {
         $pdo->prepare('INSERT INTO orders (customer_id, status, `order-UC`, apprcode, total, outlet,
+                                           bonus_photos, bonus_amount, extra_prints, extra_amount,
                                            booth_data, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
             ->execute([$custId, BOOTH_ORDER_STATUS, $sid, $str('order_ids', 255) ?: null,
-                       (string)$int('amount_total'), $outlet, $metaJson, $at, $at]);
+                       (string)$int('amount_total'), $outlet, $bonus, $int('amount_bonus'),
+                       $extra, $int('amount_extras'), $metaJson, $at, $at]);
         $orderId = (int)$pdo->lastInsertId();
     }
 
@@ -125,20 +124,11 @@ try {
         if ($itemId = (int)$st->fetchColumn()) {
             $pdo->prepare('UPDATE order_items SET product_id = ?, printCount = ?, updated_at = ? WHERE id = ?')
                 ->execute([$productId, $prints, $now, $itemId]);
-            $pdo->prepare('DELETE FROM order_item_addons WHERE order_item_id = ?')->execute([$itemId]);
         } else {
             $pdo->prepare('INSERT INTO order_items (order_id, product_id, printCount, created_at, updated_at)
                            VALUES (?, ?, ?, ?, ?)')
                 ->execute([$orderId, $productId, $prints, $at, $at]);
             $itemId = (int)$pdo->lastInsertId();
-        }
-        $addon = $pdo->prepare('INSERT INTO order_item_addons (order_item_id, addon_id, qty, created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?)');
-        if ($bonus > 0 && $addonOk(ADDON_BONUS_PHOTO_PRODUCT_ID)) {
-            $addon->execute([$itemId, ADDON_BONUS_PHOTO_PRODUCT_ID, (string)$bonus, $at, $at]);
-        }
-        if ($extra > 0 && $addonOk(ADDON_EXTRA_PRINT_PRODUCT_ID)) {
-            $addon->execute([$itemId, ADDON_EXTRA_PRINT_PRODUCT_ID, (string)$extra, $at, $at]);
         }
     }
 
