@@ -7,6 +7,9 @@
 //   stage "done": after printing (frame, sheets, bonus photos, extra prints, total)
 // The second one updates the same order instead of adding a new one.
 require __DIR__ . '/booth_config.php';
+// Defaults for settings added later, so an older booth_config.php keeps working.
+if (!defined('PROMO_SINGLE_USE')) define('PROMO_SINGLE_USE', true);
+if (!defined('PROMO_PERCENT_TYPES')) define('PROMO_PERCENT_TYPES', ['percent', 'persen', 'percentage', '%']);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 

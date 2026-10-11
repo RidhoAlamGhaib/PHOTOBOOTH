@@ -3,6 +3,9 @@
 // Answers {"valid": true, "id", "code", "nama", "diskon", "percent"} or
 // 404 / 409 {"valid": false, "message"} (message is shown on the booth screen).
 require __DIR__ . '/booth_config.php';
+// Defaults for settings added later, so an older booth_config.php keeps working.
+if (!defined('PROMO_SINGLE_USE')) define('PROMO_SINGLE_USE', true);
+if (!defined('PROMO_PERCENT_TYPES')) define('PROMO_PERCENT_TYPES', ['percent', 'persen', 'percentage', '%']);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 

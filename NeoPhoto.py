@@ -668,16 +668,21 @@ def check_promo_code(code, timeout=8):
             return "ok", data
         return "invalid", data.get("message") or "Kode promo tidak berlaku"
     except urllib.error.HTTPError as e:
+        raw = e.read()[:300]
         try:
-            data = json.loads(e.read().decode("utf-8"))
+            data = json.loads(raw.decode("utf-8"))
         except Exception:
-            data = {}
-        if e.code in (404, 409):
+            data = None
+        if e.code in (404, 409) and isinstance(data, dict) and "valid" in data:
+            LOG.info(f"[PROMO] {code}: {data.get('message')}")
             return "invalid", data.get("message") or "Kode promo tidak berlaku"
-        LOG.warning(f"[PROMO] check failed: HTTP {e.code}")
-        return "error", "Kode promo belum bisa dicek, coba lagi ya"
+        # Not an answer from booth_promo.php: file missing, wrong key, server error.
+        LOG.warning(f"[PROMO] check failed: HTTP {e.code} from {url}: {raw!r}")
+        why = {401: "API key beda", 404: "booth_promo.php belum ada di server",
+               500: "error di server/database"}.get(e.code, f"HTTP {e.code}")
+        return "error", f"Kode promo belum bisa dicek ({why})"
     except Exception as e:
-        LOG.warning(f"[PROMO] check failed: {e}")
+        LOG.warning(f"[PROMO] check failed ({url}): {e}")
         return "error", "Kode promo belum bisa dicek (internet?), coba lagi ya"
 
 
