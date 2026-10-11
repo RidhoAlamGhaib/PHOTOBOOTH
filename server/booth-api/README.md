@@ -35,11 +35,20 @@ Where it lands in the existing Laravel tables:
    `SESSIONS_API_KEY` = the same key. In `config.json`: `"booth_name"` per machine and
    `"product_id"` on each layout (the `products.id` of that package). Rebuild the exe.
 
-Test from any PC:
+Test from the booth PC (replace YOURDOMAIN and KEY):
+
+PowerShell:
+
+```powershell
+$body = @{ session_id = "test-1"; customer_name = "Test"; phone = "0812" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "https://YOURDOMAIN/booth_session.php" `
+  -Headers @{ "X-Api-Key" = "KEY" } -ContentType "application/json" -Body $body
+```
+
+CMD:
 
 ```
-curl -X POST https://YOURDOMAIN/booth_session.php -H "X-Api-Key: KEY" ^
-     -H "Content-Type: application/json" -d "{\"session_id\":\"test-1\",\"customer_name\":\"Test\",\"phone\":\"0812\"}"
+curl -X POST https://YOURDOMAIN/booth_session.php -H "X-Api-Key: KEY" -H "Content-Type: application/json" -d "{\"session_id\":\"test-1\",\"customer_name\":\"Test\",\"phone\":\"0812\"}"
 ```
 
 Answers: `200` saved (or already saved), `401` wrong key, `422` the layout's `product_id`
