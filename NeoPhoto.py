@@ -271,6 +271,7 @@ _FALLBACK_DEFAULTS = {
     "customer_form": {
         "enabled":  True,
         "required": ["name", "phone"],
+        "optin_locked": True,   # promo/update checkbox always ticked
     },
     # Automatic storage cleanup (runs at start-up and every 24 h).
     # Session folders/files older than N days are removed. 0 = keep forever.
@@ -634,6 +635,55 @@ def queue_session_upload(record):
     threading.Thread(target=flush_session_uploads, daemon=True).start()
 
 
+def _promo_url():
+    """booth_promo.php sits next to booth_session.php."""
+    if not SESSIONS_URL:
+        return ""
+    return SESSIONS_URL.rsplit("/", 1)[0] + "/booth_promo.php"
+
+
+def check_promo_code(code, timeout=8):
+    """Ask the website whether a promo code is valid.
+    Returns ("ok", promo) / ("invalid", message) / ("error", message)."""
+    url = _promo_url()
+    if not url:
+        return "error", "Kode promo belum bisa dipakai di mesin ini"
+    import urllib.request
+    import urllib.error
+    try:
+        req = urllib.request.Request(
+            url, data=json.dumps({"code": code}).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json", "X-Api-Key": SESSIONS_API_KEY,
+                     "User-Agent": "NeoPhoto"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        if data.get("valid"):
+            return "ok", data
+        return "invalid", data.get("message") or "Kode promo tidak berlaku"
+    except urllib.error.HTTPError as e:
+        try:
+            data = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            data = {}
+        if e.code in (404, 409):
+            return "invalid", data.get("message") or "Kode promo tidak berlaku"
+        LOG.warning(f"[PROMO] check failed: HTTP {e.code}")
+        return "error", "Kode promo belum bisa dicek, coba lagi ya"
+    except Exception as e:
+        LOG.warning(f"[PROMO] check failed: {e}")
+        return "error", "Kode promo belum bisa dicek (internet?), coba lagi ya"
+
+
+def promo_discount(promo, price):
+    """Rupiah off the package price for a promo from check_promo_code()."""
+    if not promo or price <= 0:
+        return 0
+    amount = int(promo.get("diskon") or 0)
+    if promo.get("percent"):
+        amount = price * min(100, amount) // 100
+    return max(0, min(price, amount))
+
+
 def flush_session_uploads():
     """Send every queued record; keep the ones that could not be sent."""
     if not SESSIONS_URL or not _sessions_lock.acquire(blocking=False):
@@ -890,7 +940,7 @@ class OnScreenKeyboard(QWidget):
     def _key(self, text, fn, w=72):
         b = QPushButton(text)
         b.setFocusPolicy(Qt.NoFocus)
-        b.setFixedSize(w, 62)
+        b.setFixedSize(w, 56)
         b.setCursor(Qt.PointingHandCursor)
         b.setStyleSheet(f"""
             QPushButton {{ background: white; color: {COLORS['ink']}; border: 2px solid {COLORS['pink_soft']};
@@ -2985,6 +3035,7 @@ class MainWindow(QMainWindow):
         self._detect_layout_slot_aspects()
         # Layout -> contact form -> payment / code -> saved online -> photos.
         self._customer = {}
+        self._promo = None
         if (CONFIG.get("customer_form", {}) or {}).get("enabled", True):
             self._goto_contact_form()
         else:
@@ -2995,9 +3046,17 @@ class MainWindow(QMainWindow):
         layout_def = self.current_layout or {}
         ac = CONFIG.get("access_code", {}) or {}
         mode = str(ac.get("mode", "free")).lower()
+        promo = getattr(self, "_promo", None)
         if PAYMENT_ENABLED and _qris_price(layout_def) > 0:
             self._session_access_code = None
-            self._goto_payment(layout_def)
+            if _qris_price(layout_def) - promo_discount(promo, _qris_price(layout_def)) > 0:
+                self._goto_payment(layout_def)
+            else:
+                self._payment_info = None        # promo covers the whole package
+                self._access_done()
+        elif promo:
+            self._session_access_code = None
+            self._access_done()
         elif mode == "paid":
             self._goto_code_input()
         else:
@@ -3955,7 +4014,7 @@ class MainWindow(QMainWindow):
         screen = QWidget()
         screen.setStyleSheet("background: transparent;")
         root = QVBoxLayout(screen)
-        root.setContentsMargins(80, 36, 80, 30)
+        root.setContentsMargins(80, 16, 80, 16)
         root.setSpacing(0)
         root.addStretch(1)
         title = QLabel("Contact Information")
@@ -4001,7 +4060,29 @@ class MainWindow(QMainWindow):
             self.cf_fields[key] = ed
             self._cf_labels[key] = (lab, label)
         grid.setRowMinimumHeight(2, 46)
-        grid.setRowMinimumHeight(4, 56)
+        grid.setRowMinimumHeight(4, 46)
+        grid.setRowMinimumHeight(6, 56)
+        plab = QLabel("Kode Promo (opsional)")
+        plab.setStyleSheet(f"color: {COLORS['ink']}; font-size: 22px; font-weight: 800; "
+                           f"background: transparent;")
+        ped = QLineEdit()
+        ped.setPlaceholderText("Punya kode promo?")
+        ped.setFixedHeight(58)
+        ped.setStyleSheet(field_css)
+        ped.setMaxLength(11)
+        ped.setValidator(QRegExpValidator(QRegExp(r"[A-Za-z0-9_-]{0,11}")))
+        ped.installEventFilter(self)
+        ped.returnPressed.connect(partial(self._contact_next_field, "promo"))
+        ped.textEdited.connect(lambda t, e=ped: (e.setText(t.upper()), e.setCursorPosition(len(t)))
+                               if t != t.upper() else None)
+        grid.addWidget(plab, 4, 0)
+        grid.addWidget(ped, 5, 0)
+        self.cf_fields["promo"] = ped
+        self.cf_promo_status = QLabel("")
+        self.cf_promo_status.setWordWrap(True)
+        self.cf_promo_status.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 20px; "
+                                           f"font-weight: 800; background: transparent;")
+        grid.addWidget(self.cf_promo_status, 5, 1)
         self.cf_fields["name"].setMaxLength(60)
         self.cf_fields["phone"].setMaxLength(16)
         self.cf_fields["phone"].setValidator(QRegExpValidator(QRegExp(r"\+?[0-9]{0,15}")))
@@ -4016,13 +4097,16 @@ class MainWindow(QMainWindow):
                          background: transparent; spacing: 12px; }}
             QCheckBox::indicator {{ width: 30px; height: 30px; border-radius: 8px;
                                     border: 2px solid {COLORS['pink']}; background: white; }}
-            QCheckBox::indicator:checked {{ background: {COLORS['pink']}; }}""")
-        grid.addWidget(self.cf_promo, 4, 0, 1, 2)
-        note = QLabel("Data kamu hanya dipakai NEO PHOTO untuk sesi ini. Info promo cuma dikirim kalau dicentang.")
+            QCheckBox::indicator:checked {{ background: {COLORS['pink']}; }}
+            QCheckBox:disabled {{ color: {COLORS['ink']}; }}
+            QCheckBox::indicator:checked:disabled {{ background: {COLORS['pink']}; }}""")
+        grid.addWidget(self.cf_promo, 6, 0, 1, 2)
+        note = QLabel("")
+        self.cf_note = note
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 15px; font-weight: 600; "
                            f"background: transparent;")
-        grid.addWidget(note, 5, 0, 1, 2)
+        grid.addWidget(note, 7, 0, 1, 2)
         root.addWidget(card, 0, Qt.AlignHCenter)
         root.addSpacing(10)
         self.cf_error = QLabel(" ")
@@ -4033,7 +4117,7 @@ class MainWindow(QMainWindow):
         root.addSpacing(8)
         self.cf_keyboard = OnScreenKeyboard()
         root.addWidget(self.cf_keyboard, 0, Qt.AlignHCenter)
-        root.addSpacing(18)
+        root.addSpacing(14)
         self.btn_cf_next = QPushButton("Lanjut  \u2192")
         self.btn_cf_next.setFixedSize(320, 70)
         self.btn_cf_next.setCursor(Qt.PointingHandCursor)
@@ -4066,6 +4150,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(screen)
         self.SCREEN_CONTACT = self.stack.indexOf(screen)
         self._customer = {}
+        self._promo = None
+        self._promo_job = None
 
     def eventFilter(self, obj, event):
         if (event.type() == QEvent.FocusIn and isinstance(obj, QLineEdit)
@@ -4083,15 +4169,26 @@ class MainWindow(QMainWindow):
         req = self._contact_required()
         for key, ed in self.cf_fields.items():
             ed.clear()
-            lab, text = self._cf_labels[key]
-            lab.setText(text + (" *" if key in req else ""))
-        self.cf_promo.setChecked(False)
+            if key in self._cf_labels:
+                lab, text = self._cf_labels[key]
+                lab.setText(text + (" *" if key in req else ""))
+        # optin_locked: always ticked and can't be unticked.
+        locked = bool((CONFIG.get("customer_form", {}) or {}).get("optin_locked", True))
+        self.cf_promo.setChecked(locked)
+        self.cf_promo.setEnabled(not locked)
+        self.cf_note.setText(
+            "Data kamu dipakai NEO PHOTO untuk sesi ini dan untuk kirim info promo & update terbaru."
+            if locked else
+            "Data kamu hanya dipakai NEO PHOTO untuk sesi ini. Info promo cuma dikirim kalau dicentang.")
+        self.cf_promo_status.setText("")
+        self.btn_cf_next.setEnabled(True)
+        self._promo_job = None
         self.cf_error.setText(" ")
         self.stack.setCurrentIndex(self.SCREEN_CONTACT)
         self.cf_fields["name"].setFocus()
 
     def _contact_next_field(self, key):
-        order = ["name", "phone", "email", "instagram"]
+        order = ["name", "phone", "email", "instagram", "promo"]
         i = order.index(key)
         if i + 1 < len(order):
             self.cf_fields[order[i + 1]].setFocus()
@@ -4100,7 +4197,9 @@ class MainWindow(QMainWindow):
 
     def _contact_submit(self):
         import re
-        v = {k: ed.text().strip() for k, ed in self.cf_fields.items()}
+        if getattr(self, "_promo_job", None):
+            return                                  # promo check still running
+        v = {k: self.cf_fields[k].text().strip() for k in ("name", "phone", "email", "instagram")}
         v["instagram"] = v["instagram"].lstrip("@")
         req = self._contact_required()
         labels = {"name": "Nama", "phone": "Telpon", "email": "Email", "instagram": "IG"}
@@ -4122,13 +4221,59 @@ class MainWindow(QMainWindow):
         v["promo_optin"] = self.cf_promo.isChecked()
         self._customer = v
         LOG.info(f"[CONTACT] form filled (promo={'yes' if v['promo_optin'] else 'no'})")
-        self._access_gate()
+        code = self.cf_fields["promo"].text().strip().upper()
+        if not code:
+            self._promo = None
+            self._access_gate()
+            return
+        if self._promo and self._promo.get("code", "").upper() == code:
+            self._access_gate()                     # already checked
+            return
+        # Check the code online without freezing the screen.
+        job = {"code": code, "result": None}
+        self._promo_job = job
+        self.cf_error.setText(" ")
+        self.cf_promo_status.setText("Mengecek kode promo\u2026")
+        self.btn_cf_next.setEnabled(False)
+
+        def work():
+            job["result"] = check_promo_code(code)
+        threading.Thread(target=work, daemon=True).start()
+        self._poll_promo_job(job)
+
+    def _poll_promo_job(self, job):
+        if job is not getattr(self, "_promo_job", None):
+            return
+        if job["result"] is None:
+            QTimer.singleShot(100, lambda: self._poll_promo_job(job))
+            return
+        self._promo_job = None
+        self.btn_cf_next.setEnabled(True)
+        status, data = job["result"]
+        if self.stack.currentIndex() != self.SCREEN_CONTACT:
+            return
+        if status != "ok":
+            self._promo = None
+            self.cf_promo_status.setText("")
+            self.cf_error.setText(data)
+            self.cf_fields["promo"].setFocus()
+            return
+        promo = dict(data, code=job["code"])
+        price = _qris_price(self.current_layout)
+        off = promo_discount(promo, price)
+        self._promo = promo
+        name = promo.get("nama") or job["code"]
+        self.cf_promo_status.setText(f"\u2713 {name}: hemat {_rp(off)}" if off else f"\u2713 {name}")
+        LOG.info(f"[PROMO] {job['code']} ok, -{off}")
+        QTimer.singleShot(900, lambda: self.stack.currentIndex() == self.SCREEN_CONTACT
+                          and self._access_gate())
 
     def _session_db_record(self, stage="done"):
         """Session data for the online database. "paid": right after payment
         (customer, package, amount). "done": after printing, with frame,
         sheets, bonus photos and extras; the server updates the same row."""
         if stage == "paid":
+            promo = getattr(self, "_promo", None) or {}
             cust = getattr(self, "_customer", {}) or {}
             lay = self.current_layout or {}
             pkg = {"package": getattr(self, "_payment_info", None)}
@@ -4138,11 +4283,14 @@ class MainWindow(QMainWindow):
             lay = getattr(self, "_pending_layout", None) or {}
             pkg = getattr(self, "_pending_pay", {}) or {}
             access_code = getattr(self, "_pending_access_code", None)
+            promo = getattr(self, "_pending_promo", None) or {}
         amounts = {k: int((pkg.get(k) or {}).get("amount") or 0) for k in ("package", "bonus", "extras")}
         orders = [str((pkg.get(k) or {}).get("order_id")) for k in ("package", "bonus", "extras")
                   if (pkg.get(k) or {}).get("order_id")]
         if pkg.get("package"):
             mode = pkg["package"].get("mode") or ""
+        elif promo:
+            mode = "promo"
         elif access_code:
             mode = "code"
         else:
@@ -4174,13 +4322,22 @@ class MainWindow(QMainWindow):
             "amount_extras":  amounts["extras"],
             "amount_total":   sum(amounts.values()),
             "payment_mode":   mode,
+            "promo_id":       int(promo.get("id") or 0),
+            "promo_code":     str(promo.get("code") or ""),
+            "amount_discount": promo_discount(promo, _qris_price(lay)) if promo else 0,
             "order_ids":      ",".join(orders),
             "folder_url":     (getattr(self, "_pending_folder_url", None) or "") if done else "",
         }
 
     def _goto_payment(self, layout_def):
-        """Package payment after the layout pick."""
-        self._begin_payment(_qris_price(layout_def), layout_def.get("name", ""),
+        """Package payment after the layout pick (minus the promo, if any)."""
+        price = _qris_price(layout_def)
+        promo = getattr(self, "_promo", None)
+        off = promo_discount(promo, price)
+        sub = layout_def.get("name", "")
+        if off:
+            sub += f"  \u00b7  Promo {promo.get('nama') or promo.get('code')} -{_rp(off)}"
+        self._begin_payment(price - off, sub,
                             on_paid=self._access_done, on_abort=self._reset_to_home,
                             kind="session")
 
@@ -5851,6 +6008,7 @@ class MainWindow(QMainWindow):
         self._pending_copies = 1 + max(0, int(getattr(self, "extra_prints", 0) or 0))
         self._pending_frame = Path(self.overlay_path).stem if getattr(self, "overlay_path", None) else ""
         self._pending_customer = dict(getattr(self, "_customer", {}) or {})
+        self._pending_promo = dict(getattr(self, "_promo", None) or {})
         self._pending_bonus_n = int(getattr(self, "_bonus_paid_n", 0) or 0)
         self._pending_access_code = getattr(self, "_session_access_code", None)
         self._pending_pay = {"package": getattr(self, "_payment_info", None),
@@ -6246,6 +6404,7 @@ class MainWindow(QMainWindow):
 
     def _reset_to_home(self):
         self._customer = {}
+        self._promo = None
         self._session_id = None
         self.is_reviewing = False
         self.is_reviewing_final = False

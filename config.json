@@ -129,7 +129,8 @@
     "required": [
       "name",
       "phone"
-    ]
+    ],
+    "optin_locked": true
   },
   "cleanup": {
     "enabled": true,

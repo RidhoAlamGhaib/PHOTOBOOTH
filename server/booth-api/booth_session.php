@@ -40,6 +40,7 @@ $productId = $int('product_id');
 $prints = max(1, $int('prints'));
 $bonus = $int('bonus_photos');
 $extra = $int('extra_prints');
+$promoId = $int('promo_id') ?: null;
 
 // Everything the existing columns have no place for.
 $meta = [
@@ -51,6 +52,7 @@ $meta = [
     'prints' => $prints, 'extra_prints' => $extra,
     'amount_package' => $int('amount_package'), 'amount_bonus' => $int('amount_bonus'),
     'amount_extras' => $int('amount_extras'), 'payment_mode' => $str('payment_mode', 20),
+    'promo_code' => $str('promo_code', 11), 'amount_discount' => $int('amount_discount'),
     'folder_url' => $str('folder_url', 255),
 ];
 
@@ -101,18 +103,18 @@ try {
     $now = date('Y-m-d H:i:s');
     if ($existing) {
         $orderId = (int)$existing['id'];
-        $pdo->prepare('UPDATE orders SET customer_id = ?, status = ?, apprcode = ?, total = ?,
+        $pdo->prepare('UPDATE orders SET customer_id = ?, status = ?, promo_id = ?, apprcode = ?, total = ?,
                               outlet = ?, bonus_photos = ?, bonus_amount = ?, extra_prints = ?,
                               extra_amount = ?, booth_data = ?, updated_at = ? WHERE id = ?')
-            ->execute([$custId, BOOTH_ORDER_STATUS, $str('order_ids', 255) ?: null,
+            ->execute([$custId, BOOTH_ORDER_STATUS, $promoId, $str('order_ids', 255) ?: null,
                        (string)$int('amount_total'), $outlet, $bonus, $int('amount_bonus'),
                        $extra, $int('amount_extras'), $metaJson, $now, $orderId]);
     } else {
-        $pdo->prepare('INSERT INTO orders (customer_id, status, `order-UC`, apprcode, total, outlet,
+        $pdo->prepare('INSERT INTO orders (customer_id, status, `order-UC`, promo_id, apprcode, total, outlet,
                                            bonus_photos, bonus_amount, extra_prints, extra_amount,
                                            booth_data, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            ->execute([$custId, BOOTH_ORDER_STATUS, $sid, $str('order_ids', 255) ?: null,
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$custId, BOOTH_ORDER_STATUS, $sid, $promoId, $str('order_ids', 255) ?: null,
                        (string)$int('amount_total'), $outlet, $bonus, $int('amount_bonus'),
                        $extra, $int('amount_extras'), $metaJson, $at, $at]);
         $orderId = (int)$pdo->lastInsertId();
@@ -130,6 +132,12 @@ try {
                 ->execute([$orderId, $productId, $prints, $at, $at]);
             $itemId = (int)$pdo->lastInsertId();
         }
+    }
+
+    // Mark a single-use promo as used by this order.
+    if ($promoId && PROMO_SINGLE_USE) {
+        $pdo->prepare('UPDATE promos SET order_id = ?, updated_at = ? WHERE id = ? AND order_id IS NULL')
+            ->execute([$orderId, $now, $promoId]);
     }
 
     $pdo->commit();

@@ -18,6 +18,7 @@ Where it lands in the existing Laravel tables:
 | Total paid (paket + foto bonus + cetak tambahan) | `orders.total` |
 | Midtrans order ids | `orders.apprcode` |
 | Machine name (`booth_name` in config.json) | `orders.outlet` (max 25 chars) |
+| Kode promo | `orders.promo_id`; single-use codes get `promos.order_id` set (see `PROMO_SINGLE_USE`) |
 | Foto bonus: jumlah, Rp | `orders.bonus_photos`, `orders.bonus_amount` (new columns) |
 | Cetak tambahan: lembar, Rp | `orders.extra_prints`, `orders.extra_amount` (new columns) |
 | Layout / frame / filter / photos / Drive link | `orders.booth_data` (new column, JSON) |
@@ -26,7 +27,7 @@ Where it lands in the existing Laravel tables:
 ## Setup (cPanel)
 
 1. **phpMyAdmin** → database `wwwneoph_Neophoto` → SQL → run `migration.sql` once.
-2. **File Manager** → upload `booth_session.php` and `booth_config.php` into the Laravel
+2. **File Manager** → upload `booth_session.php`, `booth_promo.php` and `booth_config.php` into the Laravel
    `public` folder (the one the domain points to). Plain PHP files there are served directly.
 3. Edit `booth_config.php` on the server: DB name/user/password (same as Laravel's `.env`),
    `BOOTH_API_KEY` (long random string).
@@ -56,3 +57,12 @@ is not in `products` (the booth keeps the record and retries; fix the id), `500`
 
 Offline booths keep unsent sessions in `pending_sessions.json` and retry every 5 minutes.
 Times are WIB (booth local time; the endpoint also runs in Asia/Jakarta). Use HTTPS so customer data is encrypted in transit.
+
+## Promo codes
+
+On the contact form the customer can type a code from the `promos` table. The booth asks
+`booth_promo.php` (same API key) and takes the discount off the package price:
+`Type` = `percent` / `persen` (or a `%` in `diskon`) → percentage, anything else → Rupiah off.
+A promo that covers the whole price skips the QRIS. With `PROMO_SINGLE_USE = true` a code
+works once: `promos.order_id` is set to the order that used it. Note your schema's foreign key
+`promos.order_id → orders ON DELETE CASCADE`: deleting that order also deletes the promo row.

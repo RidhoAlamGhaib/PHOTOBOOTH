@@ -17,6 +17,12 @@ const BOOTH_API_KEY = '';
 // orders.status for a session uploaded by a booth.
 const BOOTH_ORDER_STATUS = 'paid';
 
+// Promo codes (table promos). SINGLE_USE: a code is used up once promos.order_id is set
+// (the booth sets it on the order that used it). false = a code works any number of times.
+const PROMO_SINGLE_USE = true;
+// promos.Type values that mean "diskon is a percentage"; anything else = Rupiah off.
+const PROMO_PERCENT_TYPES = ['percent', 'persen', 'percentage', '%'];
+
 function db(): PDO {
     static $pdo = null;
     if ($pdo === null) {
