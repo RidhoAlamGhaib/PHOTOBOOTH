@@ -7,3 +7,4 @@ products_cache.json
 logs/*.log
 client_secret.json
 oauth_token.json
+pending_sessions.json

@@ -32,13 +32,16 @@ import dnp_status
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
-    QStackedWidget, QFrame, QProgressBar, QGraphicsDropShadowEffect, QScroller, QCheckBox
+    QStackedWidget, QFrame, QProgressBar, QGraphicsDropShadowEffect, QScroller, QCheckBox,
+    QLineEdit
 )
 from PyQt5.QtCore import (
-    Qt, QTimer, QThread, pyqtSignal, QSize, QUrl, QByteArray, QPointF, QRectF
+    Qt, QTimer, QThread, pyqtSignal, QSize, QUrl, QByteArray, QPointF, QRectF, QEvent,
+    QRegExp
 )
 from PyQt5.QtGui import (QPixmap, QImage, QIcon, QFont, QPainter, QColor,
-                         QLinearGradient, QRadialGradient, QBrush, QFontDatabase)
+                         QLinearGradient, QRadialGradient, QBrush, QFontDatabase,
+                         QRegExpValidator)
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 # --- CONFIG ---
@@ -260,6 +263,14 @@ _FALLBACK_DEFAULTS = {
     # must enter a valid 9-digit code from codes.json before each session.
     "access_code": {
         "mode": "free",
+    },
+    # Name of this photo machine, saved with every session in the online database.
+    "booth_name": "NEO-01",
+    # Customer contact form after payment, before the photos.
+    # required: any of "name", "phone", "email", "instagram".
+    "customer_form": {
+        "enabled":  True,
+        "required": ["name", "phone"],
     },
     # Automatic storage cleanup (runs at start-up and every 24 h).
     # Session folders/files older than N days are removed. 0 = keep forever.
@@ -577,6 +588,86 @@ def _rp(n):
     return f"Rp{int(n):,}".replace(",", ".")
 
 
+# ================= SESSIONS DATABASE (website NEO PHOTO) =================
+# URL of server/booth-api/booth_session.php uploaded next to the Laravel site, e.g.
+#   "https://neophoto.example/booth_session.php"
+# Empty = sessions are not uploaded. SESSIONS_API_KEY must equal BOOTH_API_KEY
+# in booth_config.php on the server. Fill both in on the booth PC before building.
+SESSIONS_URL = ""
+SESSIONS_API_KEY = ""
+SESSIONS_QUEUE = BASE_DIR / "pending_sessions.json"   # waits here while offline
+_sessions_lock = threading.Lock()
+
+
+def _read_session_queue():
+    try:
+        data = json.loads(SESSIONS_QUEUE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        LOG.warning(f"[DB] queue unreadable: {e}")
+        return []
+
+
+def _write_session_queue(items):
+    try:
+        if items:
+            tmp = SESSIONS_QUEUE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+            _os.replace(tmp, SESSIONS_QUEUE)
+        elif SESSIONS_QUEUE.exists():
+            SESSIONS_QUEUE.unlink()
+    except Exception as e:
+        LOG.error(f"[DB] queue write failed: {e}")
+
+
+def queue_session_upload(record):
+    """Save the session record, then try to send it (background)."""
+    if not SESSIONS_URL:
+        LOG.info("[DB] SESSIONS_URL empty, session not uploaded")
+        return
+    with _sessions_lock:
+        items = [r for r in _read_session_queue() if r.get("session_id") != record.get("session_id")]
+        items.append(record)
+        _write_session_queue(items)
+    threading.Thread(target=flush_session_uploads, daemon=True).start()
+
+
+def flush_session_uploads():
+    """Send every queued record; keep the ones that could not be sent."""
+    if not SESSIONS_URL or not _sessions_lock.acquire(blocking=False):
+        return
+    try:
+        import urllib.request
+        import urllib.error
+        items = _read_session_queue()
+        if not items:
+            return
+        left = []
+        for rec in items:
+            try:
+                req = urllib.request.Request(
+                    SESSIONS_URL, data=json.dumps(rec).encode("utf-8"), method="POST",
+                    headers={"Content-Type": "application/json", "X-Api-Key": SESSIONS_API_KEY,
+                             "User-Agent": "NeoPhoto"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    r.read()
+                LOG.info(f"[DB] uploaded session {rec.get('session_id')}")
+            except urllib.error.HTTPError as e:
+                if e.code == 400:      # malformed record: retrying won't help
+                    LOG.error(f"[DB] session {rec.get('session_id')} rejected: {e.read()[:200]!r}")
+                else:
+                    LOG.warning(f"[DB] upload failed (HTTP {e.code}), will retry")
+                    left.append(rec)
+            except Exception as e:
+                LOG.warning(f"[DB] upload failed ({e}), will retry")
+                left.append(rec)
+        _write_session_queue(left)
+    finally:
+        _sessions_lock.release()
+
+
 # ================= SESSION STATS =================
 STATS_FILE = BASE_DIR / "session_stats.json"
 CODES_FILE = BASE_DIR / "codes.json"
@@ -754,6 +845,84 @@ def _setup_fonts(app):
     FONT_DISPLAY = _pick("Fredoka", "Jua", "Gaegu", "Poppins", "Segoe UI Black", "Segoe UI")
     app.setFont(QFont(FONT_UI, 11))
     LOG.info(f"[FONT] ui={FONT_UI!r} display={FONT_DISPLAY!r}")
+
+
+class OnScreenKeyboard(QWidget):
+    """Touch keyboard that types into the last focused QLineEdit. The keys
+    never take focus, so the cursor stays in the field being edited."""
+    ROWS = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.target = None
+        self._shift = False
+        self._letter_btns = []
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+        for r, row in enumerate(self.ROWS):
+            line = QHBoxLayout()
+            line.setSpacing(8)
+            line.addStretch(1)
+            if r == 3:
+                self.btn_shift = self._key("\u21e7 Shift", self._toggle_shift, w=130)
+                line.addWidget(self.btn_shift)
+            for ch in row:
+                b = self._key(ch, partial(self._type_char, ch))
+                if ch.isalpha():
+                    self._letter_btns.append(b)
+                line.addWidget(b)
+            if r == 3:
+                line.addWidget(self._key("\u232b", self._backspace, w=130))
+            line.addStretch(1)
+            root.addLayout(line)
+        last = QHBoxLayout()
+        last.setSpacing(8)
+        last.addStretch(1)
+        for t in ("@", ".", "_", "-"):
+            last.addWidget(self._key(t, partial(self._type, t)))
+        last.addWidget(self._key("spasi", partial(self._type, " "), w=360))
+        last.addWidget(self._key(".com", partial(self._type, ".com"), w=110))
+        last.addWidget(self._key("@gmail.com", partial(self._type, "@gmail.com"), w=170))
+        last.addStretch(1)
+        root.addLayout(last)
+
+    def _key(self, text, fn, w=72):
+        b = QPushButton(text)
+        b.setFocusPolicy(Qt.NoFocus)
+        b.setFixedSize(w, 62)
+        b.setCursor(Qt.PointingHandCursor)
+        b.setStyleSheet(f"""
+            QPushButton {{ background: white; color: {COLORS['ink']}; border: 2px solid {COLORS['pink_soft']};
+                           border-radius: 14px; font-size: 24px; font-weight: 800; }}
+            QPushButton:pressed {{ background: {COLORS['pink']}; color: white; }}""")
+        b.clicked.connect(fn)
+        return b
+
+    def _type(self, text):
+        if self.target is not None:
+            self.target.insert(text)
+
+    def _type_char(self, ch):
+        self._type(ch.upper() if self._shift else ch)
+        if self._shift:
+            self._toggle_shift()
+
+    def _backspace(self):
+        if self.target is not None:
+            self.target.backspace()
+
+    def _toggle_shift(self):
+        self._shift = not self._shift
+        for b in self._letter_btns:
+            b.setText(b.text().upper() if self._shift else b.text().lower())
+        self.btn_shift.setStyleSheet(self.btn_shift.styleSheet().replace(
+            "background: white", f"background: {COLORS['pink_soft']}") if self._shift else
+            self.btn_shift.styleSheet().replace(f"background: {COLORS['pink_soft']}", "background: white"))
+
+    def set_shift(self, on):
+        if bool(on) != self._shift:
+            self._toggle_shift()
 
 
 class PastelBackground(QWidget):
@@ -2193,6 +2362,13 @@ class MainWindow(QMainWindow):
         self._cleanup_timer.timeout.connect(self._run_cleanup)
         self._cleanup_timer.start()
         QTimer.singleShot(20000, self._run_cleanup)
+        # Sessions saved while offline go up as soon as the internet is back.
+        self._db_timer = QTimer(self)
+        self._db_timer.setInterval(5 * 60 * 1000)
+        self._db_timer.timeout.connect(
+            lambda: threading.Thread(target=flush_session_uploads, daemon=True).start())
+        self._db_timer.start()
+        QTimer.singleShot(30000, self._db_timer.timeout.emit)
         self.dnp = None
         self._start_dnp_monitor()
         if PRODUCTS_URL:
@@ -2817,7 +2993,7 @@ class MainWindow(QMainWindow):
             self._goto_code_input()
         else:
             self._session_access_code = None
-            self._start_session()
+            self._after_access()
 
     def _detect_layout_slot_aspects(self):
         N = self.shots_per_session
@@ -3611,7 +3787,7 @@ class MainWindow(QMainWindow):
             self.code_status.setText(" ")
             # Save which code was used for the session log.
             self._session_access_code = entered
-            QTimer.singleShot(200, self._start_session)
+            QTimer.singleShot(200, self._after_access)
         elif result == "used":
             self.code_status.setText("Kode sudah pernah dipakai")
         elif result == "invalid":
@@ -3701,6 +3877,7 @@ class MainWindow(QMainWindow):
         self.btn_pay_mock.clicked.connect(self._payment_mock_paid)
         self.stack.addWidget(screen)
         self.SCREEN_PAYMENT = self.stack.indexOf(screen)
+        self._build_contact_screen()
         self.qris = QrisClient()
         self._pay_order = None
         self._pay_token = 0
@@ -3752,10 +3929,219 @@ class MainWindow(QMainWindow):
             LOG.error(f"[QRIS] QR render failed: {e}")
             self.pay_qr.setText("QR gagal ditampilkan")
 
+    # ================= CUSTOMER CONTACT FORM =================
+    def _build_contact_screen(self):
+        screen = QWidget()
+        screen.setStyleSheet("background: transparent;")
+        root = QVBoxLayout(screen)
+        root.setContentsMargins(80, 36, 80, 30)
+        root.setSpacing(0)
+        root.addStretch(1)
+        title = QLabel("Contact Information")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 48px; font-weight: 800; "
+                            f"font-family: '{FONT_DISPLAY}'; background: transparent;")
+        root.addWidget(title)
+        sub = QLabel("Isi data kamu dulu ya, Kak. Fotonya bakal kami simpan buat kamu!")
+        sub.setAlignment(Qt.AlignCenter)
+        sub.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 20px; font-weight: 600; "
+                          f"background: transparent;")
+        root.addWidget(sub)
+        root.addSpacing(18)
+
+        card = QWidget()
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setFixedWidth(1000)
+        card.setStyleSheet(f"background: {COLORS['pink_soft']}; border-radius: 28px;")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(34, 26, 34, 24)
+        grid.setHorizontalSpacing(28)
+        grid.setVerticalSpacing(6)
+        field_css = f"""
+            QLineEdit {{ background: white; color: {COLORS['ink']}; border: 2px solid white;
+                         border-radius: 14px; padding: 0 16px; font-size: 24px; font-weight: 600; }}
+            QLineEdit:focus {{ border: 3px solid {COLORS['pink']}; }}"""
+        self.cf_fields = {}
+        self._cf_labels = {}
+        specs = [("name", "Nama", "Nama kamu", 0, 0), ("phone", "Telpon", "08xxxxxxxxxx", 0, 1),
+                 ("email", "Email", "nama@email.com", 2, 0), ("instagram", "IG", "@username", 2, 1)]
+        for key, label, ph, r, c in specs:
+            lab = QLabel(label)
+            lab.setStyleSheet(f"color: {COLORS['ink']}; font-size: 22px; font-weight: 800; "
+                              f"background: transparent;")
+            ed = QLineEdit()
+            ed.setPlaceholderText(ph)
+            ed.setFixedHeight(58)
+            ed.setStyleSheet(field_css)
+            ed.installEventFilter(self)
+            ed.returnPressed.connect(partial(self._contact_next_field, key))
+            grid.addWidget(lab, r, c)
+            grid.addWidget(ed, r + 1, c)
+            self.cf_fields[key] = ed
+            self._cf_labels[key] = (lab, label)
+        grid.setRowMinimumHeight(2, 46)
+        grid.setRowMinimumHeight(4, 56)
+        self.cf_fields["name"].setMaxLength(60)
+        self.cf_fields["phone"].setMaxLength(16)
+        self.cf_fields["phone"].setValidator(QRegExpValidator(QRegExp(r"\+?[0-9]{0,15}")))
+        self.cf_fields["email"].setMaxLength(100)
+        self.cf_fields["instagram"].setMaxLength(31)
+        self.cf_fields["instagram"].setValidator(QRegExpValidator(QRegExp(r"@?[A-Za-z0-9._]{0,30}")))
+        self.cf_promo = QCheckBox("Beritahu saya tentang promo dan update terbaru")
+        self.cf_promo.setCursor(Qt.PointingHandCursor)
+        self.cf_promo.setFocusPolicy(Qt.NoFocus)
+        self.cf_promo.setStyleSheet(f"""
+            QCheckBox {{ color: {COLORS['ink']}; font-size: 20px; font-weight: 700;
+                         background: transparent; spacing: 12px; }}
+            QCheckBox::indicator {{ width: 30px; height: 30px; border-radius: 8px;
+                                    border: 2px solid {COLORS['pink']}; background: white; }}
+            QCheckBox::indicator:checked {{ background: {COLORS['pink']}; }}""")
+        grid.addWidget(self.cf_promo, 4, 0, 1, 2)
+        note = QLabel("Data kamu hanya dipakai NEO PHOTO untuk sesi ini. Info promo cuma dikirim kalau dicentang.")
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 15px; font-weight: 600; "
+                           f"background: transparent;")
+        grid.addWidget(note, 5, 0, 1, 2)
+        root.addWidget(card, 0, Qt.AlignHCenter)
+        root.addSpacing(10)
+        self.cf_error = QLabel(" ")
+        self.cf_error.setAlignment(Qt.AlignCenter)
+        self.cf_error.setStyleSheet(f"color: {COLORS['danger']}; font-size: 20px; font-weight: 800; "
+                                    f"background: transparent;")
+        root.addWidget(self.cf_error)
+        root.addSpacing(8)
+        self.cf_keyboard = OnScreenKeyboard()
+        root.addWidget(self.cf_keyboard, 0, Qt.AlignHCenter)
+        root.addSpacing(18)
+        self.btn_cf_next = QPushButton("Lanjut  \u2192")
+        self.btn_cf_next.setFixedSize(320, 70)
+        self.btn_cf_next.setCursor(Qt.PointingHandCursor)
+        self.btn_cf_next.setFocusPolicy(Qt.NoFocus)
+        self.btn_cf_next.setStyleSheet(f"""
+            QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                               stop:0 {COLORS['pink']}, stop:1 {COLORS['lilac']});
+                           color: white; border: 3px solid white; border-radius: 35px;
+                           font-size: 24px; font-weight: 900; }}""")
+        self._add_shadow(self.btn_cf_next, blur=18, y_offset=4, alpha=110)
+        self.btn_cf_next.clicked.connect(self._contact_submit)
+        root.addWidget(self.btn_cf_next, 0, Qt.AlignHCenter)
+        root.addStretch(1)
+        self.stack.addWidget(screen)
+        self.SCREEN_CONTACT = self.stack.indexOf(screen)
+        self._customer = {}
+
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.FocusIn and isinstance(obj, QLineEdit)
+                and obj in getattr(self, "cf_fields", {}).values()):
+            self.cf_keyboard.target = obj
+            # Capital letter at the start of a name.
+            self.cf_keyboard.set_shift(obj is self.cf_fields["name"] and not obj.text())
+        return super().eventFilter(obj, event)
+
+    def _contact_required(self):
+        cfg = CONFIG.get("customer_form", {}) or {}
+        return set(cfg.get("required", ["name", "phone"]) or [])
+
+    def _after_access(self):
+        """Payment / code / free start done: contact form, then the photos."""
+        if (CONFIG.get("customer_form", {}) or {}).get("enabled", True):
+            self._goto_contact_form()
+        else:
+            self._customer = {}
+            self._start_session()
+
+    def _goto_contact_form(self):
+        req = self._contact_required()
+        for key, ed in self.cf_fields.items():
+            ed.clear()
+            lab, text = self._cf_labels[key]
+            lab.setText(text + (" *" if key in req else ""))
+        self.cf_promo.setChecked(False)
+        self.cf_error.setText(" ")
+        self.stack.setCurrentIndex(self.SCREEN_CONTACT)
+        self.cf_fields["name"].setFocus()
+
+    def _contact_next_field(self, key):
+        order = ["name", "phone", "email", "instagram"]
+        i = order.index(key)
+        if i + 1 < len(order):
+            self.cf_fields[order[i + 1]].setFocus()
+        else:
+            self._contact_submit()
+
+    def _contact_submit(self):
+        import re
+        v = {k: ed.text().strip() for k, ed in self.cf_fields.items()}
+        v["instagram"] = v["instagram"].lstrip("@")
+        req = self._contact_required()
+        labels = {"name": "Nama", "phone": "Telpon", "email": "Email", "instagram": "IG"}
+        problem = None
+        for key in ("name", "phone", "email", "instagram"):
+            if key in req and not v[key]:
+                problem = (key, f"{labels[key]} belum diisi ya, Kak")
+                break
+        if problem is None and v["name"] and len(v["name"]) < 2:
+            problem = ("name", "Nama minimal 2 huruf ya, Kak")
+        if problem is None and v["phone"] and not (8 <= len(v["phone"].lstrip("+")) <= 15):
+            problem = ("phone", "Nomor telpon sepertinya kurang tepat, coba cek lagi ya")
+        if problem is None and v["email"] and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", v["email"]):
+            problem = ("email", "Format email sepertinya kurang tepat, coba cek lagi ya")
+        if problem:
+            self.cf_error.setText(problem[1])
+            self.cf_fields[problem[0]].setFocus()
+            return
+        v["promo_optin"] = self.cf_promo.isChecked()
+        self._customer = v
+        LOG.info(f"[CONTACT] form filled (promo={'yes' if v['promo_optin'] else 'no'})")
+        self._start_session()
+
+    def _session_db_record(self):
+        """Everything about the finished session for the online database."""
+        cust = getattr(self, "_pending_customer", {}) or {}
+        lay = getattr(self, "_pending_layout", None) or {}
+        pkg = getattr(self, "_pending_pay", {}) or {}
+        amounts = {k: int((pkg.get(k) or {}).get("amount") or 0) for k in ("package", "bonus", "extras")}
+        orders = [str((pkg.get(k) or {}).get("order_id")) for k in ("package", "bonus", "extras")
+                  if (pkg.get(k) or {}).get("order_id")]
+        if pkg.get("package"):
+            mode = pkg["package"].get("mode") or ""
+        elif getattr(self, "_pending_access_code", None):
+            mode = "code"
+        else:
+            mode = "free"
+        copies = int(getattr(self, "_pending_copies", 1) or 1)
+        return {
+            "session_id":     getattr(self, "_session_id", None),
+            "booth_name":     str(CONFIG.get("booth_name", "") or ""),
+            "created_at":     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "customer_name":  cust.get("name", ""),
+            "phone":          cust.get("phone", ""),
+            "email":          cust.get("email", ""),
+            "instagram":      cust.get("instagram", ""),
+            "promo_optin":    1 if cust.get("promo_optin") else 0,
+            "product_id":     int(lay.get("product_id") or 0),
+            "layout_id":      str(lay.get("id", "")),
+            "layout_name":    str(lay.get("name", "")),
+            "frame":          getattr(self, "_pending_frame", "") or "",
+            "filter":         getattr(self, "_pending_filter", "") or "",
+            "shots_total":    len(getattr(self, "_pending_all_shots", []) or []),
+            "photos_kept":    len(getattr(self, "_pending_picked", []) or []),
+            "bonus_photos":   int(getattr(self, "_pending_bonus_n", 0) or 0),
+            "prints":         copies,
+            "extra_prints":   max(0, copies - 1),
+            "amount_package": amounts["package"],
+            "amount_bonus":   amounts["bonus"],
+            "amount_extras":  amounts["extras"],
+            "amount_total":   sum(amounts.values()),
+            "payment_mode":   mode,
+            "order_ids":      ",".join(orders),
+            "folder_url":     getattr(self, "_pending_folder_url", None) or "",
+        }
+
     def _goto_payment(self, layout_def):
         """Package payment after the layout pick."""
         self._begin_payment(_qris_price(layout_def), layout_def.get("name", ""),
-                            on_paid=self._start_session, on_abort=self._reset_to_home,
+                            on_paid=self._after_access, on_abort=self._reset_to_home,
                             kind="session")
 
     def _begin_payment(self, amount, subtitle, on_paid, on_abort, kind):
@@ -5422,6 +5808,13 @@ class MainWindow(QMainWindow):
         self._pending_filter = getattr(self, "current_filter", "none")
         self._pending_indiv_fx = self.chk_indiv_fx.isChecked()
         self._pending_copies = 1 + max(0, int(getattr(self, "extra_prints", 0) or 0))
+        self._pending_frame = Path(self.overlay_path).stem if getattr(self, "overlay_path", None) else ""
+        self._pending_customer = dict(getattr(self, "_customer", {}) or {})
+        self._pending_bonus_n = int(getattr(self, "_bonus_paid_n", 0) or 0)
+        self._pending_access_code = getattr(self, "_session_access_code", None)
+        self._pending_pay = {"package": getattr(self, "_payment_info", None),
+                             "bonus": getattr(self, "_bonus_payment_info", None),
+                             "extras": getattr(self, "_extras_payment_info", None)}
 
         # Run folder-prep in BG thread; when done, continue to print step.
         threading.Thread(target=self._prep_folder_then_print, daemon=True).start()
@@ -5697,6 +6090,11 @@ class MainWindow(QMainWindow):
         except Exception as e:
             LOG.error(f"[STATS] record failed: {e}")
             stats = None
+        try:
+            queue_session_upload(self._session_db_record())
+        except Exception as e:
+            LOG.error(f"[DB] session record failed: {e}")
+        self._customer = {}
 
         # Upload the stats file to the GDrive ROOT folder (overwrite each time)
         # so the owner can check session count remotely from a phone.
@@ -5806,6 +6204,7 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_upload_session, daemon=True).start()
 
     def _reset_to_home(self):
+        self._customer = {}
         self.is_reviewing = False
         self.is_reviewing_final = False
         self.session_started = False

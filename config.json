@@ -123,6 +123,14 @@
   "access_code": {
     "mode": "free"
   },
+  "booth_name": "NEO-01",
+  "customer_form": {
+    "enabled": true,
+    "required": [
+      "name",
+      "phone"
+    ]
+  },
   "cleanup": {
     "enabled": true,
     "drive_days": 30,
