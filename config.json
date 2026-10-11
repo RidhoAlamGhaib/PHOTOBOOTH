@@ -125,6 +125,9 @@
   },
   "booth_name": "NEO-01",
   "outlet": "",
+  "admin": {
+    "exit_password": "1234"
+  },
   "customer_form": {
     "enabled": true,
     "required": [

@@ -270,6 +270,11 @@ _FALLBACK_DEFAULTS = {
     "outlet": "",
     # Customer contact form after payment, before the photos.
     # required: any of "name", "phone", "email", "instagram".
+    # Leaving the app: tap the top-left corner 3x (or press Esc), then this password.
+    # Empty password = just a confirm button.
+    "admin": {
+        "exit_password": "1234",
+    },
     "customer_form": {
         "enabled":  True,
         "required": ["name", "phone"],
@@ -4154,8 +4159,26 @@ class MainWindow(QMainWindow):
         self._customer = {}
         self._promo = None
         self._promo_job = None
+        # Hidden exit: 3 taps in the top-left corner (anywhere in the app).
+        self._corner_taps = []
+        self._last_tap_ts = None
+        self._exit_overlay = None
+        QApplication.instance().installEventFilter(self)
 
     def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress and self._exit_overlay is None:
+            ts = event.timestamp()
+            if ts != self._last_tap_ts:          # same press bubbling to a parent
+                self._last_tap_ts = ts
+                p = self.mapFromGlobal(event.globalPos())
+                if 0 <= p.x() < 120 and 0 <= p.y() < 120:
+                    now = time.monotonic()
+                    self._corner_taps = [t for t in self._corner_taps if now - t < 2.0] + [now]
+                    if len(self._corner_taps) >= 3:
+                        self._corner_taps = []
+                        QTimer.singleShot(0, self._ask_exit)
+                else:
+                    self._corner_taps = []
         if (event.type() == QEvent.FocusIn and isinstance(obj, QLineEdit)
                 and obj in getattr(self, "cf_fields", {}).values()):
             self.cf_keyboard.target = obj
@@ -6443,9 +6466,98 @@ class MainWindow(QMainWindow):
         self._wait_old_cameras()
         event.accept()
 
+    def _ask_exit(self):
+        """Password prompt before the app closes (corner taps or Esc)."""
+        if self._exit_overlay is not None:
+            return
+        pw = str((CONFIG.get("admin", {}) or {}).get("exit_password", "") or "")
+        host = self.centralWidget()
+        dim = QWidget(host)
+        dim.setAttribute(Qt.WA_StyledBackground, True)
+        dim.setStyleSheet("background: rgba(40, 20, 50, 170);")
+        dim.setGeometry(0, 0, host.width(), host.height())
+        box = QWidget(dim)
+        box.setAttribute(Qt.WA_StyledBackground, True)
+        box.setStyleSheet(f"background: white; border: 4px solid {COLORS['pink']}; border-radius: 32px;")
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(40, 30, 40, 30)
+        lay.setSpacing(16)
+        title = QLabel("Keluar dari aplikasi?")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 36px; font-weight: 800; "
+                            f"font-family: '{FONT_DISPLAY}'; border: none;")
+        lay.addWidget(title)
+        ed = None
+        kb = None
+        if pw:
+            ed = QLineEdit()
+            ed.setEchoMode(QLineEdit.Password)
+            ed.setPlaceholderText("Password admin")
+            ed.setFixedHeight(60)
+            ed.setAlignment(Qt.AlignCenter)
+            ed.setStyleSheet(f"QLineEdit {{ border: 3px solid {COLORS['pink_soft']}; border-radius: 16px; "
+                             f"font-size: 28px; font-weight: 700; color: {COLORS['ink']}; }}")
+            lay.addWidget(ed)
+            kb = OnScreenKeyboard()
+            kb.target = ed
+            lay.addWidget(kb, 0, Qt.AlignHCenter)
+        err = QLabel(" ")
+        err.setAlignment(Qt.AlignCenter)
+        err.setStyleSheet(f"color: {COLORS['danger']}; font-size: 20px; font-weight: 800; border: none;")
+        lay.addWidget(err)
+        row = QHBoxLayout()
+        row.setSpacing(24)
+        row.addStretch(1)
+        btn_cancel = QPushButton("Batal")
+        btn_exit = QPushButton("Keluar")
+        for b, primary in ((btn_cancel, False), (btn_exit, True)):
+            b.setFixedSize(220, 66)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setStyleSheet(
+                f"QPushButton {{ background: {COLORS['pink'] if primary else 'white'}; "
+                f"color: {'white' if primary else COLORS['ink']}; border: 2px solid {COLORS['pink']}; "
+                f"border-radius: 33px; font-size: 22px; font-weight: 900; }}")
+            row.addWidget(b)
+        row.addStretch(1)
+        lay.addLayout(row)
+        bw = min(1100, host.width() - 60)
+        box.setFixedWidth(bw)
+        bh = lay.totalHeightForWidth(bw)
+        if bh <= 0:
+            bh = lay.sizeHint().height()
+        box.setFixedHeight(min(host.height() - 40, bh))
+        box.move((host.width() - bw) // 2, max(20, (host.height() - box.height()) // 2))
+
+        def close_overlay():
+            self._exit_overlay = None
+            dim.deleteLater()
+
+        def try_exit():
+            if pw and ed.text() != pw:
+                err.setText("Password salah")
+                ed.clear()
+                LOG.warning("[ADMIN] wrong exit password")
+                return
+            LOG.info("[ADMIN] exit by operator")
+            close_overlay()
+            self.close()
+
+        btn_cancel.clicked.connect(close_overlay)
+        btn_exit.clicked.connect(try_exit)
+        if ed is not None:
+            ed.returnPressed.connect(try_exit)
+        self._exit_overlay = dim
+        dim.show()
+        dim.raise_()
+        if ed is not None:
+            ed.setFocus()
+        # Nobody there? Close the prompt by itself.
+        QTimer.singleShot(30000, lambda: self._exit_overlay is dim and close_overlay())
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
-            self.close()
+            self._ask_exit()
         elif event.key() == Qt.Key_F12:
             # Hidden admin: show session stats popup.
             self._show_session_stats()

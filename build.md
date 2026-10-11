@@ -199,7 +199,7 @@ Do one full session: shoot → pick → frame → extra print → print → scan
 The first Drive upload opens a browser for Google login. **Do this once on the booth PC before
 the event**; after that `oauth_token.json` is reused.
 
-Keys: `Esc` closes the app, `F12` shows session stats.
+Keys: tap the top-left corner 3 times (or press `Esc`) and enter `admin.exit_password` from `config.json` to close the app; `F12` shows session stats.
 
 ## 7. Troubleshooting
 
