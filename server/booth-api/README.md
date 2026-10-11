@@ -17,7 +17,8 @@ Where it lands in the existing Laravel tables:
 | Session id | `orders.order-UC` (unique: one order per session) |
 | Total paid (paket + foto bonus + cetak tambahan) | `orders.total` |
 | Midtrans order ids | `orders.apprcode` |
-| Machine name (`booth_name` in config.json) | `orders.outlet` (max 25 chars) |
+| Machine name / number (`booth_name` in config.json) | `orders.machine` (new column) |
+| Outlet / location (`outlet` in config.json) | `orders.outlet` (max 25 chars) |
 | Kode promo | `orders.promo_id`; single-use codes get `promos.order_id` set (see `PROMO_SINGLE_USE`) |
 | Foto bonus: jumlah, Rp | `orders.bonus_photos`, `orders.bonus_amount` (new columns) |
 | Cetak tambahan: lembar, Rp | `orders.extra_prints`, `orders.extra_amount` (new columns) |
@@ -26,14 +27,16 @@ Where it lands in the existing Laravel tables:
 
 ## Setup (cPanel)
 
-1. **phpMyAdmin** → database `wwwneoph_Neophoto` → SQL → run `migration.sql` once.
+1. **phpMyAdmin** → database `wwwneoph_Neophoto` → SQL → run `migration.sql` once
+   (already ran an older one? run only `migration_002_machine.sql`).
 2. **File Manager** → upload `booth_session.php`, `booth_promo.php` and `booth_config.php` into the Laravel
    `public` folder (the one the domain points to). Plain PHP files there are served directly.
 3. Edit `booth_config.php` on the server: DB name/user/password (same as Laravel's `.env`),
    `BOOTH_API_KEY` (long random string).
 4. **Booth PC**, in `NeoPhoto.py`:
    `SESSIONS_URL = "https://YOURDOMAIN/booth_session.php"` and
-   `SESSIONS_API_KEY` = the same key. In `config.json`: `"booth_name"` per machine and
+   `SESSIONS_API_KEY` = the same key (one key for all booths). In `config.json`: `"booth_name"`
+   (machine name / number), `"outlet"` (location) per machine and
    `"product_id"` on each layout (the `products.id` of that package). Rebuild the exe.
 
 Test from the booth PC (replace YOURDOMAIN and KEY):

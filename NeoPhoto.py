@@ -264,8 +264,10 @@ _FALLBACK_DEFAULTS = {
     "access_code": {
         "mode": "free",
     },
-    # Name of this photo machine, saved with every session in the online database.
+    # This photo machine's name / number and the outlet (location) it stands in;
+    # saved on every order in the online database (orders.machine, orders.outlet).
     "booth_name": "NEO-01",
+    "outlet": "",
     # Customer contact form after payment, before the photos.
     # required: any of "name", "phone", "email", "instagram".
     "customer_form": {
@@ -4301,6 +4303,7 @@ class MainWindow(QMainWindow):
             "session_id":     getattr(self, "_session_id", None),
             "stage":          stage,
             "booth_name":     str(CONFIG.get("booth_name", "") or ""),
+            "outlet":         str(CONFIG.get("outlet", "") or ""),
             "created_at":     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "customer_name":  cust.get("name", ""),
             "phone":          cust.get("phone", ""),

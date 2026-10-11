@@ -45,7 +45,7 @@ $promoId = $int('promo_id') ?: null;
 // Everything the existing columns have no place for.
 $meta = [
     'stage' => $str('stage', 10) ?: 'done',
-    'booth' => $str('booth_name', 60), 'layout_id' => $str('layout_id', 60),
+    'booth' => $str('booth_name', 60), 'outlet' => $str('outlet', 25), 'layout_id' => $str('layout_id', 60),
     'layout_name' => $str('layout_name', 120), 'frame' => $str('frame', 120),
     'filter' => $str('filter', 40), 'shots_total' => $int('shots_total'),
     'photos_kept' => $int('photos_kept'), 'bonus_photos' => $bonus,
@@ -99,23 +99,24 @@ try {
     }
 
     $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $outlet = mb_substr($meta['booth'], 0, 25, 'UTF-8') ?: null;
+    $machine = $meta['booth'] ?: null;
+    $outlet = $meta['outlet'] ?: null;
     $now = date('Y-m-d H:i:s');
     if ($existing) {
         $orderId = (int)$existing['id'];
         $pdo->prepare('UPDATE orders SET customer_id = ?, status = ?, promo_id = ?, apprcode = ?, total = ?,
-                              outlet = ?, bonus_photos = ?, bonus_amount = ?, extra_prints = ?,
+                              outlet = ?, machine = ?, bonus_photos = ?, bonus_amount = ?, extra_prints = ?,
                               extra_amount = ?, booth_data = ?, updated_at = ? WHERE id = ?')
             ->execute([$custId, BOOTH_ORDER_STATUS, $promoId, $str('order_ids', 255) ?: null,
-                       (string)$int('amount_total'), $outlet, $bonus, $int('amount_bonus'),
+                       (string)$int('amount_total'), $outlet, $machine, $bonus, $int('amount_bonus'),
                        $extra, $int('amount_extras'), $metaJson, $now, $orderId]);
     } else {
         $pdo->prepare('INSERT INTO orders (customer_id, status, `order-UC`, promo_id, apprcode, total, outlet,
-                                           bonus_photos, bonus_amount, extra_prints, extra_amount,
+                                           machine, bonus_photos, bonus_amount, extra_prints, extra_amount,
                                            booth_data, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
             ->execute([$custId, BOOTH_ORDER_STATUS, $sid, $promoId, $str('order_ids', 255) ?: null,
-                       (string)$int('amount_total'), $outlet, $bonus, $int('amount_bonus'),
+                       (string)$int('amount_total'), $outlet, $machine, $bonus, $int('amount_bonus'),
                        $extra, $int('amount_extras'), $metaJson, $at, $at]);
         $orderId = (int)$pdo->lastInsertId();
     }

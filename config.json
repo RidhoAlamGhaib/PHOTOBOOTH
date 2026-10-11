@@ -124,6 +124,7 @@
     "mode": "free"
   },
   "booth_name": "NEO-01",
+  "outlet": "",
   "customer_form": {
     "enabled": true,
     "required": [
