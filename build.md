@@ -23,7 +23,7 @@ From the `photobooth` folder:
 py -m venv .venv-build
 .venv-build\Scripts\activate
 python -m pip install --upgrade pip
-pip install pyinstaller pyqt5 opencv-python numpy pillow qrcode google-api-python-client google-auth google-auth-oauthlib pywin32
+pip install pyinstaller pyqt5 opencv-python numpy pillow qrcode google-api-python-client google-auth google-auth-oauthlib pywin32 truststore certifi
 ```
 
 What each one is for:
@@ -36,6 +36,7 @@ What each one is for:
 | `qrcode` | QR on the print + done screen |
 | `google-api-python-client`, `google-auth`, `google-auth-oauthlib` | Drive upload |
 | `pywin32` | printing (`win32print`, `win32ui`) |
+| `truststore`, `certifi` | HTTPS to Midtrans / your website trusts the same certificates as Windows. Without it: `CERTIFICATE_VERIFY_FAILED ... self-signed certificate in certificate chain` |
 
 Check that the app runs from this venv **before** building:
 
@@ -48,7 +49,7 @@ python NeoPhoto.py
 Run from the `photobooth` folder with the venv active:
 
 ```bat
-pyinstaller --noconfirm --onefile --clean --windowed --name NeoPhoto --add-data "EDSDK\Dll;EDSDK\Dll" --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status --hidden-import win32print --hidden-import win32ui --hidden-import win32con --collect-data googleapiclient --exclude-module tkinter NeoPhoto.py
+pyinstaller --noconfirm --onefile --clean --windowed --name NeoPhoto --add-data "EDSDK\Dll;EDSDK\Dll" --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status --hidden-import win32print --hidden-import win32ui --hidden-import win32con --hidden-import qrcode --hidden-import truststore --hidden-import certifi --hidden-import google.oauth2.credentials --hidden-import google_auth_oauthlib.flow --hidden-import google.auth.transport.requests --hidden-import googleapiclient.discovery --hidden-import googleapiclient.http --collect-data googleapiclient --collect-data certifi --exclude-module tkinter NeoPhoto.py
 ```
 
 Camera-only test exe (keeps the console so you can read its output):
@@ -154,7 +155,11 @@ pyinstaller --noconfirm --onefile --clean --windowed --name NeoPhoto ^
   --add-data "EDSDK\Dll;EDSDK\Dll" ^
   --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status ^
   --hidden-import win32print --hidden-import win32ui --hidden-import win32con ^
-  --collect-data googleapiclient ^
+  --hidden-import qrcode --hidden-import truststore --hidden-import certifi ^
+  --hidden-import google.oauth2.credentials --hidden-import google_auth_oauthlib.flow ^
+  --hidden-import google.auth.transport.requests ^
+  --hidden-import googleapiclient.discovery --hidden-import googleapiclient.http ^
+  --collect-data googleapiclient --collect-data certifi ^
   --exclude-module tkinter ^
   NeoPhoto.py
 if errorlevel 1 (
@@ -191,6 +196,8 @@ Run `dist\NeoPhoto\NeoPhoto.exe`, then open the newest `logs\photobooth_YYYYMMDD
 | Config loaded | `[CONFIG] OK loaded from ...\config.json` |
 | Canon | `[CAMERA] source=canon`, `[CANON] session opened`, `[CANON] live view -> PC` |
 | Fonts | `[FONT] ui='Nunito' display='Fredoka'` |
+| HTTPS | `[TLS] using the Windows certificate store (truststore)` |
+| Website DB | `[DB] uploaded session ...` |
 | Drive | `[GDRIVE] subfolder created: https://drive.google.com/...` |
 | Print | `[PRINT] copy 1/1 sent=True` |
 | Individual photos | `[INDIV] saved 6/6 to ...\captures\SESSION_...` |
@@ -210,6 +217,8 @@ Keys: tap the top-left corner 3 times (or press `Esc`) and enter `admin.exit_pas
 | `DLL load failed` for EDSDK | Install the **Microsoft Visual C++ 2015-2022 Redistributable (x64)** on the booth PC. |
 | `[CAMERA] Canon EDSDK init FAILED`, then webcam fallback | Read the traceback in the log. Also close EOS Utility / EOS Webcam Utility. |
 | `UnknownApiNameOrVersion: drive v3` | Rebuild with `--collect-data googleapiclient`. |
+| `No module named 'google'` / `'qrcode'` in the log | That package wasn't installed in the venv you built from. Activate the venv, run the `pip install` line from step 2, check with `python -c "import qrcode, googleapiclient, truststore"`, rebuild. |
+| `CERTIFICATE_VERIFY_FAILED` / `self-signed certificate in certificate chain` | Build with `truststore` + `certifi` installed (step 2). Log must show `[TLS] using the Windows certificate store`. |
 | `OAuth client secrets not found` | Copy `client_secret.json` next to `NeoPhoto.exe`. |
 | `[PRINT] pywin32 not available` | `pip install pywin32` in the build venv, then rebuild. |
 | App starts then closes instantly, no window | Check `logs\` for `Uncaught exception`. For a visible console while debugging, rebuild without `--windowed`. |

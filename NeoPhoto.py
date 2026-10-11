@@ -113,6 +113,33 @@ def _setup_logging():
 
 LOG = _setup_logging()
 
+
+def _setup_tls():
+    """Let HTTPS verify certificates the way Windows does. Python's own check
+    only sees the root certificates already in the Windows store; Windows
+    fetches missing roots on demand, and antivirus "HTTPS scanning" adds its
+    own root. Without this the booth fails with CERTIFICATE_VERIFY_FAILED /
+    "self-signed certificate in certificate chain" while browsers work."""
+    import ssl
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+        LOG.info("[TLS] using the Windows certificate store (truststore)")
+        return
+    except Exception as e:
+        LOG.warning(f"[TLS] truststore unavailable ({e}); falling back to certifi")
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        ctx.load_default_certs()
+        ssl._create_default_https_context = lambda *a, **k: ctx
+        LOG.info("[TLS] using certifi + Windows root certificates")
+    except Exception as e:
+        LOG.warning(f"[TLS] certifi unavailable ({e}); using Python defaults")
+
+
+_setup_tls()
+
 MAX_SLOTS = 12   # poses (max 8) + bonus shots
 
 _FALLBACK_DEFAULTS = {
@@ -429,15 +456,14 @@ class QrisClient:
                 LOG.warning("[QRIS] sandbox mode with a production key - charges will fail")
 
     def _req(self, method, path, body=None, timeout=15):
-        import base64, ssl, urllib.request, urllib.error
+        import base64, urllib.request, urllib.error
         auth = base64.b64encode(f"{self.server_key}:".encode()).decode()
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method, headers={
             "Accept": "application/json", "Content-Type": "application/json",
             "Authorization": f"Basic {auth}"})
         try:
-            with urllib.request.urlopen(req, timeout=timeout,
-                                        context=ssl.create_default_context()) as r:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
                 out = json.loads(r.read().decode() or "{}")
         except urllib.error.HTTPError as e:
             try:
