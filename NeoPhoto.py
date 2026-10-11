@@ -1989,7 +1989,9 @@ def _list_printers_win():
         import win32print
         return [p[2] for p in win32print.EnumPrinters(
             win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
-    except Exception:
+    except Exception as e:
+        LOG.error(f"[PRINT] can't list printers ({type(e).__name__}: {e}) - "
+                  f"pywin32 missing from the build?")
         return []
 
 
