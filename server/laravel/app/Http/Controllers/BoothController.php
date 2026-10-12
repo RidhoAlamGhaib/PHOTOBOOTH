@@ -200,7 +200,9 @@ class BoothController extends Controller
             });
         } catch (\Throwable $e) {
             Log::error('[booth] session ' . $sid . ': ' . $e->getMessage());
-            return response()->json(['error' => 'database error'], 500);
+            // Only an authorised booth gets here, so it may see why (shows up in the booth log).
+            return response()->json(['error' => 'database error',
+                                     'detail' => mb_substr($e->getMessage(), 0, 300)], 500);
         }
         return response()->json(['ok' => true] + $result);
     }
