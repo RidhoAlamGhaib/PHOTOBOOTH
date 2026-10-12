@@ -747,7 +747,7 @@ def promo_result_from(status, data, err):
         return "ok", data
     if status in (404, 409) and isinstance(data, dict) and "valid" in data:
         return "invalid", data.get("message") or "Kode promo tidak berlaku"
-    hint = _body_hint((err or "").encode("utf-8")) if err else "-"
+    hint = _body_hint((err or "").encode("utf-8")) if err else json.dumps(data)[:200]
     LOG.warning(f"[PROMO] bridge check failed: HTTP {status}: {hint}")
     why = {0: "tidak tersambung ke website", 401: "API key beda", 404: "route /booth/promo belum ada",
            419: "sesi web kedaluwarsa", 500: "error di server/database"}.get(status, f"HTTP {status}")
