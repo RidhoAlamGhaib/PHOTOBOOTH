@@ -77,3 +77,11 @@ Please wait while your request is being verified" page (HTML, `wsidchk` in the s
 is not a browser and can't pass that check, so promo checks and uploads fail. Ask the host to
 exclude `/booth_session.php` and `/booth_promo.php` from anti-bot / WebShield protection (or to
 whitelist the booths' IP addresses). The booth logs this case as "hosting bot-protection page".
+
+### Workaround: Cloudflare Worker relay
+
+If the host can only whitelist IP addresses, put `cloudflare-worker.js` on a Worker with the
+custom domain `booth.neophotoindonesia.my.id` and ask the host to whitelist Cloudflare's
+Workers address `2a06:98c0:3600::103`. Booths then use
+`SESSIONS_URL = "https://booth.neophotoindonesia.my.id/booth_session.php"`
+(promo checks follow automatically). One Worker serves every booth.
