@@ -20,7 +20,8 @@ from PyQt5.QtCore import QObject, QTimer, QUrl
 LOG = logging.getLogger("web_bridge")
 
 try:
-    from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngineView
     AVAILABLE = True
 except Exception as _e:          # PyQtWebEngine not installed / not bundled
     AVAILABLE = False
@@ -49,6 +50,13 @@ class WebBridge(QObject):
         self.profile.setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
         self.page = QWebEnginePage(self.profile, self)
         self.page.loadFinished.connect(lambda ok: LOG.info(f"[WEB] bridge page loaded ok={ok}"))
+        # The anti-bot script rejects a page without a window (outerWidth/Height = 0,
+        # "zeroOuterDimensions"). Give it a real 1280x800 window that is never drawn.
+        self.view = QWebEngineView()
+        self.view.setPage(self.page)
+        self.view.setAttribute(Qt.WA_DontShowOnScreen, True)
+        self.view.resize(1280, 800)
+        self.view.show()
 
     # ---- public -------------------------------------------------------------
     def call(self, path, payload, callback):
@@ -104,6 +112,7 @@ class WebBridge(QObject):
             self._ready = ok
             if not ok:
                 LOG.warning(f"[WEB] {why}")
+                self.page.load(QUrl("about:blank"))     # stop a challenge page reloading forever
             waiters, self._ready_waiters = self._ready_waiters, []
             for w in waiters:
                 w(ok, why)
