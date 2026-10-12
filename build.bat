@@ -5,16 +5,16 @@ if not exist .venv-build\Scripts\python.exe (
   pause
   exit /b 1
 )
-".venv-build\Scripts\python.exe" -c "import PyInstaller, truststore, certifi, qrcode, googleapiclient, win32print" 2>nul
+".venv-build\Scripts\python.exe" -c "import PyInstaller, truststore, certifi, qrcode, googleapiclient, win32print, PyQt5.QtWebEngineWidgets" 2>nul
 if errorlevel 1 (
   echo Missing packages in .venv-build. Run:
-  echo   .venv-build\Scripts\python.exe -m pip install pyinstaller pyqt5 opencv-python numpy pillow qrcode google-api-python-client google-auth google-auth-oauthlib pywin32 truststore certifi
+  echo   .venv-build\Scripts\python.exe -m pip install pyinstaller pyqt5 opencv-python numpy pillow qrcode google-api-python-client google-auth google-auth-oauthlib pywin32 truststore certifi PyQtWebEngine
   pause
   exit /b 1
 )
 ".venv-build\Scripts\python.exe" -m PyInstaller --noconfirm --onefile --clean --windowed --name NeoPhoto ^
   --add-data "EDSDK\Dll;EDSDK\Dll" ^
-  --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status ^
+  --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status --hidden-import web_bridge --hidden-import PyQt5.QtWebEngineWidgets ^
   --hidden-import win32print --hidden-import win32ui --hidden-import win32con ^
   --hidden-import qrcode --hidden-import truststore --hidden-import certifi ^
   --hidden-import google.oauth2.credentials --hidden-import google_auth_oauthlib.flow ^

@@ -629,6 +629,13 @@ def _rp(n):
 # in booth_config.php on the server. Fill both in on the booth PC before building.
 SESSIONS_URL = ""
 SESSIONS_API_KEY = ""
+# Preferred: the Laravel site itself, reached through a hidden browser so the
+# hosting's anti-bot check (Imunify360) lets the booth through. Set the site's
+# base URL, e.g. "https://neophotoindonesia.my.id" (routes /booth/bridge,
+# /booth/session, /booth/promo from server/laravel). When set, SESSIONS_URL is
+# not used. SESSIONS_API_KEY must equal BOOTH_API_KEY in the site's .env.
+BOOTH_SITE_URL = ""
+_bridge_flush = None        # set by MainWindow when the hidden browser is used
 SESSIONS_QUEUE = BASE_DIR / "pending_sessions.json"   # waits here while offline
 _sessions_lock = threading.Lock()
 
@@ -658,14 +665,17 @@ def _write_session_queue(items):
 
 def queue_session_upload(record):
     """Save the session record, then try to send it (background)."""
-    if not SESSIONS_URL:
-        LOG.info("[DB] SESSIONS_URL empty, session not uploaded")
+    if not (SESSIONS_URL or BOOTH_SITE_URL):
+        LOG.info("[DB] SESSIONS_URL / BOOTH_SITE_URL empty, session not uploaded")
         return
     with _sessions_lock:
         items = [r for r in _read_session_queue() if r.get("session_id") != record.get("session_id")]
         items.append(record)
         _write_session_queue(items)
-    threading.Thread(target=flush_session_uploads, daemon=True).start()
+    if _bridge_flush is not None:
+        QTimer.singleShot(0, _bridge_flush)
+    else:
+        threading.Thread(target=flush_session_uploads, daemon=True).start()
 
 
 def _body_hint(raw):
@@ -729,6 +739,19 @@ def check_promo_code(code, timeout=8):
     except Exception as e:
         LOG.warning(f"[PROMO] check failed ({url}): {e}")
         return "error", "Kode promo belum bisa dicek (internet?), coba lagi ya"
+
+
+def promo_result_from(status, data, err):
+    """(status, data, error) from the hidden-browser bridge -> like check_promo_code()."""
+    if status == 200 and isinstance(data, dict) and data.get("valid"):
+        return "ok", data
+    if status in (404, 409) and isinstance(data, dict) and "valid" in data:
+        return "invalid", data.get("message") or "Kode promo tidak berlaku"
+    hint = _body_hint((err or "").encode("utf-8")) if err else "-"
+    LOG.warning(f"[PROMO] bridge check failed: HTTP {status}: {hint}")
+    why = {0: "tidak tersambung ke website", 401: "API key beda", 404: "route /booth/promo belum ada",
+           419: "sesi web kedaluwarsa", 500: "error di server/database"}.get(status, f"HTTP {status}")
+    return "error", f"Kode promo belum bisa dicek ({why})"
 
 
 def promo_discount(promo, price):
@@ -2481,11 +2504,25 @@ class MainWindow(QMainWindow):
         self._cleanup_timer.timeout.connect(self._run_cleanup)
         self._cleanup_timer.start()
         QTimer.singleShot(20000, self._run_cleanup)
+        # Website connection: hidden browser (BOOTH_SITE_URL) or plain HTTPS (SESSIONS_URL).
+        self.web_bridge = None
+        self._db_flushing = False
+        if BOOTH_SITE_URL:
+            try:
+                import web_bridge
+                self.web_bridge = web_bridge.WebBridge(
+                    BOOTH_SITE_URL.rstrip("/") + "/booth/bridge", SESSIONS_API_KEY,
+                    BASE_DIR / "webdata", self)
+                global _bridge_flush
+                _bridge_flush = self._flush_sessions_bridge
+                LOG.info(f"[WEB] using hidden browser for {BOOTH_SITE_URL}")
+            except Exception as e:
+                LOG.error(f"[WEB] hidden browser unavailable ({e}); website calls disabled. "
+                          f"Install PyQtWebEngine and rebuild.")
         # Sessions saved while offline go up as soon as the internet is back.
         self._db_timer = QTimer(self)
         self._db_timer.setInterval(5 * 60 * 1000)
-        self._db_timer.timeout.connect(
-            lambda: threading.Thread(target=flush_session_uploads, daemon=True).start())
+        self._db_timer.timeout.connect(self._flush_sessions_now)
         self._db_timer.start()
         QTimer.singleShot(30000, self._db_timer.timeout.emit)
         self.dnp = None
@@ -4323,9 +4360,14 @@ class MainWindow(QMainWindow):
         self.cf_promo_status.setText("Mengecek kode promo\u2026")
         self.btn_cf_next.setEnabled(False)
 
-        def work():
-            job["result"] = check_promo_code(code)
-        threading.Thread(target=work, daemon=True).start()
+        if self.web_bridge is not None:
+            self.web_bridge.call("/booth/promo", {"code": code},
+                                 lambda st, data, err: job.__setitem__(
+                                     "result", promo_result_from(st, data, err)))
+        else:
+            def work():
+                job["result"] = check_promo_code(code)
+            threading.Thread(target=work, daemon=True).start()
         self._poll_promo_job(job)
 
     def _poll_promo_job(self, job):
@@ -4354,6 +4396,40 @@ class MainWindow(QMainWindow):
         LOG.info(f"[PROMO] {job['code']} ok, -{off}")
         QTimer.singleShot(900, lambda: self.stack.currentIndex() == self.SCREEN_CONTACT
                           and self._access_gate())
+
+    def _flush_sessions_now(self):
+        if self.web_bridge is not None:
+            self._flush_sessions_bridge()
+        elif SESSIONS_URL:
+            threading.Thread(target=flush_session_uploads, daemon=True).start()
+
+    def _flush_sessions_bridge(self):
+        """Send queued sessions one by one through the hidden browser."""
+        if self.web_bridge is None or self._db_flushing:
+            return
+        items = _read_session_queue()
+        if not items:
+            return
+        rec = items[0]
+        self._db_flushing = True
+
+        def done(status, data, err):
+            self._db_flushing = False
+            sid = rec.get("session_id")
+            ok = status == 200 and isinstance(data, dict) and bool(data.get("ok"))
+            if ok or status == 400:
+                with _sessions_lock:      # drop exactly this record (a newer one may have replaced it)
+                    _write_session_queue([r for r in _read_session_queue() if r != rec])
+                if ok:
+                    LOG.info(f"[DB] uploaded session {sid} ({rec.get('stage')})")
+                else:
+                    LOG.error(f"[DB] session {sid} rejected: {data or err}")
+                QTimer.singleShot(0, self._flush_sessions_bridge)
+            else:
+                hint = _body_hint((err or "").encode("utf-8")) if err else (data or "-")
+                LOG.warning(f"[DB] upload of {sid} failed (HTTP {status}: {hint}), will retry")
+
+        self.web_bridge.call("/booth/session", rec, done)
 
     def _session_db_record(self, stage="done"):
         """Session data for the online database. "paid": right after payment
@@ -6775,6 +6851,13 @@ def _install_exit_camera_cleanup(app, win):
 
 
 if __name__ == "__main__":
+    # QtWebEngine (hidden browser for the website) must be set up before QApplication.
+    try:
+        from PyQt5.QtCore import QCoreApplication
+        QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+        import PyQt5.QtWebEngineWidgets  # noqa: F401
+    except Exception as e:
+        LOG.warning(f"[WEB] PyQtWebEngine not available: {e}")
     app = QApplication(sys.argv)
     _setup_fonts(app)
     _apply_ui_scaling(app)

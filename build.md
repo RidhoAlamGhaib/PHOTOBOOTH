@@ -23,7 +23,7 @@ From the `photobooth` folder:
 py -m venv .venv-build
 .venv-build\Scripts\activate
 python -m pip install --upgrade pip
-pip install pyinstaller pyqt5 opencv-python numpy pillow qrcode google-api-python-client google-auth google-auth-oauthlib pywin32 truststore certifi
+pip install pyinstaller pyqt5 opencv-python numpy pillow qrcode google-api-python-client google-auth google-auth-oauthlib pywin32 truststore certifi PyQtWebEngine
 ```
 
 What each one is for:
@@ -36,6 +36,7 @@ What each one is for:
 | `qrcode` | QR on the print + done screen |
 | `google-api-python-client`, `google-auth`, `google-auth-oauthlib` | Drive upload |
 | `pywin32` | printing (`win32print`, `win32ui`) |
+| `PyQtWebEngine` | hidden browser that talks to the website (`BOOTH_SITE_URL`), so the hosting's anti-bot check lets the booth through. Adds ~100 MB to the exe. |
 | `truststore`, `certifi` | HTTPS to Midtrans / your website trusts the same certificates as Windows. Without it: `CERTIFICATE_VERIFY_FAILED ... self-signed certificate in certificate chain` |
 
 Check that the app runs from this venv **before** building:
@@ -49,7 +50,7 @@ python NeoPhoto.py
 Run from the `photobooth` folder with the venv active:
 
 ```bat
-pyinstaller --noconfirm --onefile --clean --windowed --name NeoPhoto --add-data "EDSDK\Dll;EDSDK\Dll" --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status --hidden-import win32print --hidden-import win32ui --hidden-import win32con --hidden-import qrcode --hidden-import truststore --hidden-import certifi --hidden-import google.oauth2.credentials --hidden-import google_auth_oauthlib.flow --hidden-import google.auth.transport.requests --hidden-import googleapiclient.discovery --hidden-import googleapiclient.http --collect-data googleapiclient --collect-data certifi --exclude-module tkinter NeoPhoto.py
+pyinstaller --noconfirm --onefile --clean --windowed --name NeoPhoto --add-data "EDSDK\Dll;EDSDK\Dll" --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status --hidden-import web_bridge --hidden-import PyQt5.QtWebEngineWidgets --hidden-import win32print --hidden-import win32ui --hidden-import win32con --hidden-import qrcode --hidden-import truststore --hidden-import certifi --hidden-import google.oauth2.credentials --hidden-import google_auth_oauthlib.flow --hidden-import google.auth.transport.requests --hidden-import googleapiclient.discovery --hidden-import googleapiclient.http --collect-data googleapiclient --collect-data certifi --exclude-module tkinter NeoPhoto.py
 ```
 
 Camera-only test exe (keeps the console so you can read its output):
