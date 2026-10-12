@@ -668,6 +668,17 @@ def queue_session_upload(record):
     threading.Thread(target=flush_session_uploads, daemon=True).start()
 
 
+def _body_hint(raw):
+    """Short, single-line description of an unexpected HTTP body for the log."""
+    text = (raw or b"")[:400].decode("utf-8", "replace")
+    if not text.strip():
+        return "(empty body)"
+    low = text.lower()
+    if "just a moment" in low or "cf-chl" in low or "cloudflare" in low:
+        return "Cloudflare challenge page (turn off Bot Fight Mode / add a WAF skip rule)"
+    return " ".join(text.split())[:200]
+
+
 def _promo_url():
     """booth_promo.php sits next to booth_session.php."""
     if not SESSIONS_URL:
@@ -689,7 +700,12 @@ def check_promo_code(code, timeout=8):
             headers={"Content-Type": "application/json", "X-Api-Key": SESSIONS_API_KEY,
                      "User-Agent": "NeoPhoto"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = json.loads(r.read().decode("utf-8"))
+            raw = r.read()
+        try:
+            data = json.loads(raw.decode("utf-8-sig"))
+        except ValueError:
+            LOG.warning(f"[PROMO] {url} answered HTTP 200 but not JSON: {_body_hint(raw)}")
+            return "error", "Kode promo belum bisa dicek (server balas bukan JSON)"
         if data.get("valid"):
             return "ok", data
         return "invalid", data.get("message") or "Kode promo tidak berlaku"
@@ -740,7 +756,17 @@ def flush_session_uploads():
                     headers={"Content-Type": "application/json", "X-Api-Key": SESSIONS_API_KEY,
                              "User-Agent": "NeoPhoto"})
                 with urllib.request.urlopen(req, timeout=15) as r:
-                    r.read()
+                    raw = r.read()
+                try:
+                    ok = bool(json.loads(raw.decode("utf-8-sig")).get("ok"))
+                except (ValueError, AttributeError):
+                    ok = False
+                if not ok:
+                    # e.g. a Cloudflare challenge or a Laravel page: not saved, keep it.
+                    LOG.warning(f"[DB] {SESSIONS_URL} answered without ok=true, will retry: "
+                                f"{_body_hint(raw)}")
+                    left.append(rec)
+                    continue
                 LOG.info(f"[DB] uploaded session {rec.get('session_id')}")
             except urllib.error.HTTPError as e:
                 if e.code == 400:      # malformed record: retrying won't help
