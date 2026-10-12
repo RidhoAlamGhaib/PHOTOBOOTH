@@ -113,6 +113,7 @@ class BoothController extends Controller
             'bonus_photos' => $bonus, 'prints' => $prints, 'extra_prints' => $extra,
             'amount_package' => self::int($in, 'amount_package'), 'amount_bonus' => self::int($in, 'amount_bonus'),
             'amount_extras' => self::int($in, 'amount_extras'), 'payment_mode' => self::str($in, 'payment_mode', 20),
+            'order_ids' => self::str($in, 'order_ids', 255),
             'promo_code' => self::str($in, 'promo_code', 11), 'amount_discount' => self::int($in, 'amount_discount'),
             'folder_url' => self::str($in, 'folder_url', 255),
         ];
@@ -162,7 +163,7 @@ class BoothController extends Controller
                     'customer_id' => $custId,
                     'status' => config('services.booth.order_status', 'paid'),
                     'promo_id' => $promoId,
-                    'apprcode' => self::str($in, 'order_ids', 255) ?: null,
+                    'apprcode' => (self::str($in, 'apprcode', 255) ?: self::str($in, 'order_ids', 255)) ?: null,
                     'total' => (string) self::int($in, 'amount_total'),
                     'outlet' => $meta['outlet'] ?: null,
                     'machine' => $meta['booth'] ?: null,

@@ -55,6 +55,7 @@ $meta = [
     'prints' => $prints, 'extra_prints' => $extra,
     'amount_package' => $int('amount_package'), 'amount_bonus' => $int('amount_bonus'),
     'amount_extras' => $int('amount_extras'), 'payment_mode' => $str('payment_mode', 20),
+    'order_ids' => $str('order_ids', 255),
     'promo_code' => $str('promo_code', 11), 'amount_discount' => $int('amount_discount'),
     'folder_url' => $str('folder_url', 255),
 ];
@@ -110,7 +111,7 @@ try {
         $pdo->prepare('UPDATE orders SET customer_id = ?, status = ?, promo_id = ?, apprcode = ?, total = ?,
                               outlet = ?, machine = ?, bonus_photos = ?, bonus_amount = ?, extra_prints = ?,
                               extra_amount = ?, booth_data = ?, updated_at = ? WHERE id = ?')
-            ->execute([$custId, BOOTH_ORDER_STATUS, $promoId, $str('order_ids', 255) ?: null,
+            ->execute([$custId, BOOTH_ORDER_STATUS, $promoId, ($str('apprcode', 255) ?: $str('order_ids', 255)) ?: null,
                        (string)$int('amount_total'), $outlet, $machine, $bonus, $int('amount_bonus'),
                        $extra, $int('amount_extras'), $metaJson, $now, $orderId]);
     } else {
@@ -118,7 +119,7 @@ try {
                                            machine, bonus_photos, bonus_amount, extra_prints, extra_amount,
                                            booth_data, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            ->execute([$custId, BOOTH_ORDER_STATUS, $sid, $promoId, $str('order_ids', 255) ?: null,
+            ->execute([$custId, BOOTH_ORDER_STATUS, $sid, $promoId, ($str('apprcode', 255) ?: $str('order_ids', 255)) ?: null,
                        (string)$int('amount_total'), $outlet, $machine, $bonus, $int('amount_bonus'),
                        $extra, $int('amount_extras'), $metaJson, $at, $at]);
         $orderId = (int)$pdo->lastInsertId();

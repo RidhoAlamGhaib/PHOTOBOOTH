@@ -447,6 +447,7 @@ class QrisClient:
         self.base = ("https://api.midtrans.com" if self.production
                      else "https://api.sandbox.midtrans.com")
         self._mock_paid = set()
+        self._details = {}          # order_id -> last Midtrans status response
         self._lock = threading.Lock()
         if not self.mock:
             sb = self.server_key.startswith("SB-")
@@ -502,7 +503,16 @@ class QrisClient:
         if self.mock:
             with self._lock:
                 return "settlement" if order_id in self._mock_paid else "pending"
-        return str(self._req("GET", f"/v2/{order_id}/status").get("transaction_status") or "pending")
+        out = self._req("GET", f"/v2/{order_id}/status")
+        self._details[order_id] = out
+        return str(out.get("transaction_status") or "pending")
+
+    def detail(self, order_id):
+        """Last Midtrans status response for this order (approval_code,
+        transaction_id, issuer, ...); {} if none yet."""
+        if self.mock:
+            return {"transaction_id": f"MOCK-{order_id}", "approval_code": "", "issuer": "mock"}
+        return dict(self._details.get(order_id) or {})
 
     def cancel(self, order_id):
         if self.mock:
@@ -4450,6 +4460,13 @@ class MainWindow(QMainWindow):
         amounts = {k: int((pkg.get(k) or {}).get("amount") or 0) for k in ("package", "bonus", "extras")}
         orders = [str((pkg.get(k) or {}).get("order_id")) for k in ("package", "bonus", "extras")
                   if (pkg.get(k) or {}).get("order_id")]
+        # orders.apprcode: Midtrans approval code, else Midtrans transaction id, per payment.
+        apprs = []
+        for k in ("package", "bonus", "extras"):
+            p = pkg.get(k) or {}
+            ref = p.get("approval_code") or p.get("transaction_id")
+            if ref:
+                apprs.append(str(ref))
         if pkg.get("package"):
             mode = pkg["package"].get("mode") or ""
         elif promo:
@@ -4490,6 +4507,7 @@ class MainWindow(QMainWindow):
             "promo_code":     str(promo.get("code") or ""),
             "amount_discount": promo_discount(promo, _qris_price(lay)) if promo else 0,
             "order_ids":      ",".join(orders),
+            "apprcode":       ",".join(apprs),
             "folder_url":     (getattr(self, "_pending_folder_url", None) or "") if done else "",
         }
 
@@ -4586,7 +4604,13 @@ class MainWindow(QMainWindow):
             return
         if st in QrisClient.PAID:
             self._pay_tick.stop()
+            d = self.qris.detail(self._pay_order)
             info = {"order_id": self._pay_order, "amount": self._pay_amount,
+                    # Midtrans' own references: approval_code (when the issuer sends one)
+                    # and transaction_id (always), for orders.apprcode.
+                    "approval_code": str(d.get("approval_code") or ""),
+                    "transaction_id": str(d.get("transaction_id") or ""),
+                    "issuer": str(d.get("issuer") or ""),
                     "mock": self.qris.mock,
                     "mode": "mock" if self.qris.mock else
                     ("production" if self.qris.production else "sandbox")}
