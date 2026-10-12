@@ -31,8 +31,8 @@ Both use the page's CSRF token plus the `X-Api-Key` header.
 `.env`: `BOOTH_API_KEY=<long random string>` (same as `SESSIONS_API_KEY` in `NeoPhoto.py`).
 If the site caches config, run `php artisan config:clear` (or `config:cache`) afterwards.
 
-Database: run `server/booth-api/migration.sql` (and `migration_002_machine.sql` if you ran
-an older one) so `customers.promo_optin` and the `orders` booth columns exist.
+Database: run `server/booth-api/migration_safe.sql` on the live database (only adds columns
+with defaults; existing rows untouched; safe to run twice).
 
 ## Booth
 
