@@ -674,6 +674,9 @@ def _body_hint(raw):
     if not text.strip():
         return "(empty body)"
     low = text.lower()
+    if "wsidchk" in low or "one moment, please" in low:
+        return ("hosting bot-protection page (Imunify360 'One moment, please'): ask the host to "
+                "exclude /booth_*.php from anti-bot protection")
     if "just a moment" in low or "cf-chl" in low or "cloudflare" in low:
         return "Cloudflare challenge page (turn off Bot Fight Mode / add a WAF skip rule)"
     return " ".join(text.split())[:200]

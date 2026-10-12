@@ -69,3 +69,11 @@ On the contact form the customer can type a code from the `promos` table. The bo
 A promo that covers the whole price skips the QRIS. With `PROMO_SINGLE_USE = true` a code
 works once: `promos.order_id` is set to the order that used it. Note your schema's foreign key
 `promos.order_id → orders ON DELETE CASCADE`: deleting that order also deletes the promo row.
+
+## Hosting bot protection
+
+Many cPanel hosts run Imunify360, which answers unknown clients with a "One moment, please...
+Please wait while your request is being verified" page (HTML, `wsidchk` in the source). The booth
+is not a browser and can't pass that check, so promo checks and uploads fail. Ask the host to
+exclude `/booth_session.php` and `/booth_promo.php` from anti-bot / WebShield protection (or to
+whitelist the booths' IP addresses). The booth logs this case as "hosting bot-protection page".
