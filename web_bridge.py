@@ -28,6 +28,19 @@ except Exception as _e:          # PyQtWebEngine not installed / not bundled
     _IMPORT_ERROR = _e
 
 
+if AVAILABLE:
+    class _BridgePage(QWebEnginePage):
+        """Logs certificate problems instead of failing silently."""
+        def certificateError(self, error):
+            LOG.warning(f"[WEB] certificate error for {error.url().toString()}: "
+                        f"{error.errorDescription()}")
+            return False
+
+        def javaScriptConsoleMessage(self, level, message, line, source):
+            if level >= QWebEnginePage.ErrorMessageLevel:
+                LOG.info(f"[WEB] page console: {message}")
+
+
 class WebBridge(QObject):
     READY_TIMEOUT_S = 45      # page load + anti-bot check
     CALL_TIMEOUT_S = 25
@@ -48,8 +61,9 @@ class WebBridge(QObject):
         self.profile.setPersistentStoragePath(str(storage_dir))
         self.profile.setCachePath(str(storage_dir / "cache"))
         self.profile.setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
-        self.page = QWebEnginePage(self.profile, self)
-        self.page.loadFinished.connect(lambda ok: LOG.info(f"[WEB] bridge page loaded ok={ok}"))
+        self.page = _BridgePage(self.profile, self)
+        self.page.loadFinished.connect(self._on_load_finished)
+        self._load_failures = 0
         # The anti-bot script rejects a page without a window (outerWidth/Height = 0,
         # "zeroOuterDimensions"). Give it a real 1280x800 window that is never drawn.
         self.view = QWebEngineView()
@@ -66,6 +80,16 @@ class WebBridge(QObject):
         self._pump()
 
     # ---- internals ----------------------------------------------------------
+    def _on_load_finished(self, ok):
+        url = self.page.url().toString()
+        LOG.info(f"[WEB] bridge page loaded ok={ok} ({url})")
+        # A failed load (no internet, timeout, DNS) shows Chromium's error page and never
+        # becomes ready: retry a few times while someone is waiting for the bridge.
+        if not ok and self._loading and url != "about:blank" and self._load_failures < 4:
+            self._load_failures += 1
+            LOG.warning(f"[WEB] bridge page failed to load, retry {self._load_failures}/4 in 3 s")
+            QTimer.singleShot(3000, lambda: self._loading and self.page.load(QUrl(self.bridge_url)))
+
     def _pump(self):
         if self._busy or not self._queue:
             return
@@ -90,9 +114,10 @@ class WebBridge(QObject):
         if self._loading:
             return
         self._loading = True
+        self._load_failures = 0
         LOG.info(f"[WEB] opening {self.bridge_url}")
         self.page.load(QUrl(self.bridge_url))
-        deadline = time.monotonic() + self.READY_TIMEOUT_S
+        deadline = time.monotonic() + self.READY_TIMEOUT_S + 15
 
         def check():
             self.page.runJavaScript(
