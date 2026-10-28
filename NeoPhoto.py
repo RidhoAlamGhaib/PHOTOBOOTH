@@ -291,6 +291,16 @@ _FALLBACK_DEFAULTS = {
     "access_code": {
         "mode": "free",
     },
+    # How customers get a session:
+    #   "qris"   = choose a layout, pay with QRIS (bonus photos / extra prints are paid too)
+    #   "coupon" = type the code bought on the website (order_items.code); the order's
+    #              printType picks the layout (layout "print_type", else its "id"),
+    #              printCount = sheets printed; nothing else to pay, nothing sent back.
+    # qris_provider: "midtrans" or "bca" (keys are set in NeoPhoto.py, not here).
+    "payment": {
+        "mode": "qris",
+        "qris_provider": "midtrans",
+    },
     # This photo machine's name / number and the outlet (location) it stands in;
     # saved on every order in the online database (orders.machine, orders.outlet).
     "booth_name": "NEO-01",
@@ -526,6 +536,207 @@ class QrisClient:
     def mark_mock_paid(self, order_id):
         with self._lock:
             self._mock_paid.add(order_id)
+
+
+# ================= QRIS via BCA (SNAP BI "QRIS MPM") =================
+# Used when config.json "payment": {"qris_provider": "bca"}. Everything below comes
+# from BCA after the merchant's API registration (developer.bca.co.id). Fill in on the
+# booth PC before building the exe; empty = demo QR (like Midtrans without a key).
+#   BCA_PRIVATE_KEY_PEM: the RSA private key whose PUBLIC key was given to BCA
+#   (paste the whole "-----BEGIN ... PRIVATE KEY-----" block between the quotes).
+# Field names follow the SNAP BI standard; check them against BCA's own document
+# once it arrives (paths / service code may differ per bank).
+BCA_IS_PRODUCTION   = False
+BCA_BASE_URL        = ""        # empty = https://sandbox.bca.co.id (or the production URL BCA gives)
+BCA_CLIENT_ID       = ""        # X-CLIENT-KEY
+BCA_CLIENT_SECRET   = ""
+BCA_PARTNER_ID      = ""        # X-PARTNER-ID
+BCA_CHANNEL_ID      = ""        # CHANNEL-ID
+BCA_MERCHANT_ID     = ""
+BCA_TERMINAL_ID     = ""
+BCA_PRIVATE_KEY_PEM = """"""
+BCA_SANDBOX_URL     = "https://sandbox.bca.co.id"
+BCA_PATH_TOKEN      = "/openapi/v1.0/access-token/b2b"
+BCA_PATH_GENERATE   = "/openapi/v1.0/qr/qr-mpm-generate"
+BCA_PATH_QUERY      = "/openapi/v1.0/qr/qr-mpm-query"
+BCA_SERVICE_CODE    = "47"      # SNAP service code for QRIS MPM
+
+
+class BcaQrisClient:
+    """BCA SNAP QRIS MPM (stdlib + RSA signing from cryptography / google-auth),
+    or a mock when the keys are empty. Same interface as QrisClient:
+      access token: X-SIGNATURE = RSA-SHA256(client_id|timestamp), private key
+      other calls:  X-SIGNATURE = HMAC-SHA512(secret,
+                      METHOD:path:token:sha256hex(minified body):timestamp)
+    Statuses are mapped onto Midtrans' names so the payment screen stays the same."""
+    PAID = QrisClient.PAID
+    FAILED = QrisClient.FAILED
+    STATUS = {"00": "settlement", "04": "refund", "05": "cancel", "06": "failure",
+              "07": "pending"}       # 01 initiated, 02 paying, 03 pending, 07 not found yet
+
+    def __init__(self):
+        self.production = bool(BCA_IS_PRODUCTION)
+        self.base = (BCA_BASE_URL or BCA_SANDBOX_URL).rstrip("/")
+        self.mock = not (BCA_CLIENT_ID and BCA_CLIENT_SECRET and BCA_PRIVATE_KEY_PEM.strip()
+                         and BCA_MERCHANT_ID)
+        self._token, self._token_until = None, 0.0
+        self._refs = {}             # order_id -> BCA referenceNo
+        self._details = {}
+        self._mock_paid = set()
+        self._lock = threading.Lock()
+        self._ext = 0
+
+    @staticmethod
+    def _timestamp():
+        return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7))) \
+            .strftime("%Y-%m-%dT%H:%M:%S+07:00")
+
+    @staticmethod
+    def _rsa_sign(data):
+        import base64
+        pem = BCA_PRIVATE_KEY_PEM.strip().encode()
+        try:
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import padding
+            key = serialization.load_pem_private_key(pem, password=None)
+            sig = key.sign(data, padding.PKCS1v15(), hashes.SHA256())
+        except ImportError:
+            from google.auth.crypt import RSASigner
+            sig = RSASigner.from_string(pem).sign(data)
+        return base64.b64encode(sig).decode()
+
+    def _post(self, path, body, headers, timeout=15):
+        import urllib.request, urllib.error
+        data = json.dumps(body, separators=(",", ":")).encode()
+        req = urllib.request.Request(self.base + path, data=data, method="POST", headers=dict(
+            {"Content-Type": "application/json", "Accept": "application/json"}, **headers))
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                out = json.loads(r.read().decode() or "{}")
+        except urllib.error.HTTPError as e:
+            try:
+                out = json.loads(e.read().decode() or "{}")
+            except Exception:
+                raise QrisError(f"BCA HTTP {e.code}") from e
+        except Exception as e:
+            raise QrisError(f"tidak bisa terhubung ke BCA ({e})") from e
+        code = str(out.get("responseCode", ""))
+        if not code.startswith("200"):
+            raise QrisError(f"BCA {code} {out.get('responseMessage', '')}".strip())
+        return out
+
+    def _access_token(self):
+        with self._lock:
+            if self._token and time.time() < self._token_until:
+                return self._token
+        ts = self._timestamp()
+        out = self._post(BCA_PATH_TOKEN, {"grantType": "client_credentials"}, {
+            "X-TIMESTAMP": ts, "X-CLIENT-KEY": BCA_CLIENT_ID,
+            "X-SIGNATURE": self._rsa_sign(f"{BCA_CLIENT_ID}|{ts}".encode())})
+        token = out.get("accessToken")
+        if not token:
+            raise QrisError("BCA: tidak dapat access token")
+        with self._lock:
+            self._token = token
+            self._token_until = time.time() + max(60, int(out.get("expiresIn") or 900) - 60)
+        return token
+
+    def _call(self, path, body):
+        import base64, hashlib, hmac
+        token = self._access_token()
+        ts = self._timestamp()
+        minified = json.dumps(body, separators=(",", ":"))
+        digest = hashlib.sha256(minified.encode()).hexdigest().lower()
+        sig = hmac.new(BCA_CLIENT_SECRET.encode(),
+                       f"POST:{path}:{token}:{digest}:{ts}".encode(), hashlib.sha512).digest()
+        with self._lock:
+            self._ext = (self._ext + 1) % 1000
+            ext = f"{int(time.time() * 1000)}{self._ext:03d}"   # unique per day
+        return self._post(path, body, {
+            "Authorization": f"Bearer {token}", "X-TIMESTAMP": ts,
+            "X-SIGNATURE": base64.b64encode(sig).decode(), "X-PARTNER-ID": BCA_PARTNER_ID,
+            "X-EXTERNAL-ID": ext, "CHANNEL-ID": BCA_CHANNEL_ID})
+
+    def charge(self, order_id, amount):
+        amount = int(amount)
+        if self.mock:
+            LOG.info(f"[QRIS-BCA] MOCK charge {order_id} Rp{amount}")
+            return {"qr_string": f"MOCK-QRIS-BCA|{order_id}|{amount}|BUKAN-PEMBAYARAN-ASLI",
+                    "qr_url": None}
+        until = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7))) \
+            + datetime.timedelta(minutes=int(PAYMENT_TIMEOUT_MINUTES))
+        out = self._call(BCA_PATH_GENERATE, {
+            "partnerReferenceNo": order_id,
+            "amount": {"value": f"{amount}.00", "currency": "IDR"},
+            "merchantId": BCA_MERCHANT_ID,
+            "terminalId": BCA_TERMINAL_ID,
+            "validityPeriod": until.strftime("%Y-%m-%dT%H:%M:%S+07:00"),
+        })
+        if not out.get("qrContent"):
+            raise QrisError("respon BCA tanpa QR")
+        self._refs[order_id] = out.get("referenceNo") or ""
+        LOG.info(f"[QRIS-BCA] charge {order_id} Rp{amount} ref={self._refs[order_id]}")
+        return {"qr_string": out["qrContent"], "qr_url": None}
+
+    def status(self, order_id):
+        if self.mock:
+            with self._lock:
+                return "settlement" if order_id in self._mock_paid else "pending"
+        body = {"originalPartnerReferenceNo": order_id, "serviceCode": BCA_SERVICE_CODE,
+                "merchantId": BCA_MERCHANT_ID}
+        if self._refs.get(order_id):
+            body["originalReferenceNo"] = self._refs[order_id]
+        out = self._call(BCA_PATH_QUERY, body)
+        self._details[order_id] = out
+        return self.STATUS.get(str(out.get("latestTransactionStatus", "")), "pending")
+
+    def detail(self, order_id):
+        """approval_code / transaction_id for orders.apprcode, like Midtrans."""
+        if self.mock:
+            return {"transaction_id": f"MOCK-{order_id}", "approval_code": "", "issuer": "mock"}
+        d = self._details.get(order_id) or {}
+        info = d.get("additionalInfo") or {}
+        return {"approval_code": str(d.get("approvalCode") or info.get("approvalCode") or ""),
+                "transaction_id": str(d.get("originalReferenceNo") or self._refs.get(order_id) or ""),
+                "issuer": str(info.get("issuerName") or d.get("issuerName") or "")}
+
+    def cancel(self, order_id):
+        pass                        # a BCA QR simply expires (validityPeriod)
+
+    def mark_mock_paid(self, order_id):
+        with self._lock:
+            self._mock_paid.add(order_id)
+
+
+def _payment_cfg():
+    return CONFIG.get("payment", {}) or {}
+
+
+def coupon_mode():
+    """config.json "payment": {"mode": "coupon"} -> code from the website, no QRIS."""
+    return str(_payment_cfg().get("mode", "qris")).strip().lower() in ("coupon", "kupon", "code")
+
+
+def make_qris_client():
+    if str(_payment_cfg().get("qris_provider", "midtrans")).strip().lower() == "bca":
+        return BcaQrisClient()
+    return QrisClient()
+
+
+def coupon_result_from(status, data, err):
+    """(status, data, error) from the bridge's POST /booth/coupon ->
+    ("ok", data) / ("not_found" | "not_paid", message) / ("error", message)."""
+    if status == 200 and isinstance(data, dict) and data.get("valid"):
+        return "ok", data
+    if status in (404, 409) and isinstance(data, dict) and "valid" in data:
+        return ("not_paid" if data.get("reason") == "not_paid" else "not_found"), \
+            data.get("message") or "Kode tidak ditemukan"
+    hint = _body_hint((err or "").encode("utf-8")) if err else json.dumps(data)[:200]
+    LOG.warning(f"[COUPON] bridge check failed: HTTP {status}: {hint}")
+    why = {0: "tidak tersambung ke website", 401: "API key beda",
+           404: "route /booth/coupon belum ada", 419: "sesi web kedaluwarsa",
+           500: "error di server/database"}.get(status, f"HTTP {status}")
+    return "error", f"Kode belum bisa dicek ({why})"
 
 
 def _price(layout_def, key):
@@ -3131,6 +3342,9 @@ class MainWindow(QMainWindow):
             self._render_lp_preview(chosen)
 
     def _goto_layout_picker(self):
+        if coupon_mode():
+            self._goto_coupon_input()
+            return
         if not self.layouts:
             self._pick_layout(self.current_layout)
             return
@@ -3140,7 +3354,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(self.SCREEN_LAYOUTS)
         QTimer.singleShot(0, self._fit_lp_layout)
 
-    def _pick_layout(self, layout_def):
+    def _apply_layout(self, layout_def):
         self.current_layout    = layout_def
         self.shots_per_session = max(1, int(layout_def.get("poses", 4)))
         global FRAME_DIR
@@ -3149,6 +3363,10 @@ class MainWindow(QMainWindow):
             FRAME_DIR = new_frame_dir
         self._load_frames()
         self._detect_layout_slot_aspects()
+
+    def _pick_layout(self, layout_def):
+        self._coupon = None
+        self._apply_layout(layout_def)
         # Layout -> contact form -> payment / code -> saved online -> photos.
         self._customer = {}
         self._promo = None
@@ -3185,11 +3403,17 @@ class MainWindow(QMainWindow):
         event_name = ((_load_gdrive_config().get("event_name") or "Session")
                       .strip().replace(" ", "-"))
         self._session_id = f"{event_name}-{ts}-{random.randint(0, 0xFFFF):04x}"
-        try:
-            queue_session_upload(self._session_db_record("paid"))
-        except Exception as e:
-            LOG.error(f"[DB] session record failed: {e}")
+        if not getattr(self, "_coupon", None):      # a coupon's order is already online
+            try:
+                queue_session_upload(self._session_db_record("paid"))
+            except Exception as e:
+                LOG.error(f"[DB] session record failed: {e}")
         self._start_session()
+
+    def _charges_on(self):
+        """Bonus photos / extra prints are paid with QRIS (not with a coupon:
+        the customer gets exactly what the website order says)."""
+        return PAYMENT_ENABLED and not getattr(self, "_coupon", None)
 
     def _detect_layout_slot_aspects(self):
         N = self.shots_per_session
@@ -3577,7 +3801,7 @@ class MainWindow(QMainWindow):
 
     def _max_extra_prints(self):
         pcfg = CONFIG.get("printing", {}) or {}
-        if not pcfg.get("enabled", True):
+        if not pcfg.get("enabled", True) or getattr(self, "_coupon", None):
             return 0
         try:
             n = max(0, int(pcfg.get("max_extra_prints", 0)))
@@ -3600,7 +3824,7 @@ class MainWindow(QMainWindow):
         self.extra_value.setText(str(self.extra_prints))
         self.btn_extra_minus.setEnabled(self.extra_prints > 0)
         self.btn_extra_plus.setEnabled(self.extra_prints < mx)
-        ep = _price(self.current_layout, "extra_print_price") if PAYMENT_ENABLED else 0
+        ep = _price(self.current_layout, "extra_print_price") if self._charges_on() else 0
         paid = bool(ep and self.extra_prints > 0)
         if paid:
             txt = (f"{self.extra_prints} x {_rp(ep)} = {_rp(self.extra_prints * ep)}\n"
@@ -4074,7 +4298,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(screen)
         self.SCREEN_PAYMENT = self.stack.indexOf(screen)
         self._build_contact_screen()
-        self.qris = QrisClient()
+        self._build_coupon_screen()
+        self.qris = make_qris_client()
         self._pay_order = None
         self._pay_token = 0
         self._pay_polling = False
@@ -4089,7 +4314,9 @@ class MainWindow(QMainWindow):
         self._pay_tick.setInterval(1000)
         self._pay_tick.timeout.connect(self._payment_tick)
         LOG.info(f"[QRIS] payment {'ON' if PAYMENT_ENABLED else 'OFF'}, "
-                 f"{'MOCK (no server key)' if self.qris.mock else ('PRODUCTION' if self.qris.production else 'SANDBOX')}")
+                 f"{type(self.qris).__name__} "
+                 f"{'MOCK (no server key)' if self.qris.mock else ('PRODUCTION' if self.qris.production else 'SANDBOX')}"
+                 + (", mode COUPON (QRIS not used)" if coupon_mode() else ""))
 
     def _set_payment_qr(self, text=None, png_bytes=None):
         """Render the QR from its string (or a downloaded PNG) into the label."""
@@ -4407,6 +4634,169 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(900, lambda: self.stack.currentIndex() == self.SCREEN_CONTACT
                           and self._access_gate())
 
+    # =============== COUPON CODE (config "payment": {"mode": "coupon"}) ===============
+    def _build_coupon_screen(self):
+        screen = QWidget()
+        screen.setStyleSheet("background: transparent;")
+        root = QVBoxLayout(screen)
+        root.setContentsMargins(80, 16, 80, 16)
+        root.setSpacing(0)
+        root.addStretch(1)
+        title = QLabel("Masukkan Kode Kamu")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 52px; font-weight: 800; "
+                            f"font-family: '{FONT_DISPLAY}'; background: transparent;")
+        root.addWidget(title)
+        sub = QLabel("Ketik kode yang kamu dapat setelah pembayaran ya, Kak.")
+        sub.setAlignment(Qt.AlignCenter)
+        sub.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 20px; font-weight: 600; "
+                          f"background: transparent;")
+        root.addWidget(sub)
+        root.addSpacing(26)
+        self.cp_field = QLineEdit()
+        self.cp_field.setPlaceholderText("Kode")
+        self.cp_field.setAlignment(Qt.AlignCenter)
+        self.cp_field.setFixedSize(640, 84)
+        self.cp_field.setMaxLength(64)
+        self.cp_field.setValidator(QRegExpValidator(QRegExp(r"\S{0,64}")))
+        self.cp_field.setStyleSheet(f"""
+            QLineEdit {{ background: white; color: {COLORS['ink']}; border: 3px solid {COLORS['pink']};
+                         border-radius: 20px; padding: 0 16px; font-size: 36px; font-weight: 800;
+                         letter-spacing: 4px; }}""")
+        self.cp_field.returnPressed.connect(self._coupon_submit)
+        root.addWidget(self.cp_field, 0, Qt.AlignHCenter)
+        root.addSpacing(12)
+        self.cp_status = QLabel(" ")
+        self.cp_status.setAlignment(Qt.AlignCenter)
+        self.cp_status.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 20px; font-weight: 800; "
+                                     f"background: transparent;")
+        root.addWidget(self.cp_status)
+        root.addSpacing(12)
+        self.cp_keyboard = OnScreenKeyboard()
+        self.cp_keyboard.target = self.cp_field
+        root.addWidget(self.cp_keyboard, 0, Qt.AlignHCenter)
+        root.addSpacing(20)
+        self.btn_cp_next = QPushButton("Lanjut  →")
+        self.btn_cp_next.setFixedSize(320, 70)
+        self.btn_cp_next.setCursor(Qt.PointingHandCursor)
+        self.btn_cp_next.setFocusPolicy(Qt.NoFocus)
+        self.btn_cp_next.setStyleSheet(self.btn_cf_next.styleSheet())
+        self._add_shadow(self.btn_cp_next, blur=18, y_offset=4, alpha=110)
+        self.btn_cp_next.clicked.connect(self._coupon_submit)
+        btn_back = QPushButton("Kembali")
+        btn_back.setFixedSize(220, 70)
+        btn_back.setCursor(Qt.PointingHandCursor)
+        btn_back.setFocusPolicy(Qt.NoFocus)
+        btn_back.setStyleSheet(self.btn_cf_back.styleSheet())
+        btn_back.clicked.connect(self._reset_to_home)
+        nav = QHBoxLayout()
+        nav.setSpacing(28)
+        nav.addStretch(1)
+        nav.addWidget(btn_back)
+        nav.addWidget(self.btn_cp_next)
+        nav.addStretch(1)
+        root.addLayout(nav)
+        root.addStretch(1)
+        self.stack.addWidget(screen)
+        self.SCREEN_COUPON = self.stack.indexOf(screen)
+        self._coupon_screen = screen
+        self._coupon = None
+        self._coupon_job = None
+
+    def _goto_coupon_input(self):
+        self._coupon = None
+        self._coupon_job = None
+        self.cp_field.clear()
+        self.cp_status.setText(" ")
+        self.btn_cp_next.setEnabled(True)
+        self.stack.setCurrentIndex(self.SCREEN_COUPON)
+        self.cp_field.setFocus()
+
+    def _layout_for_print_type(self, print_type):
+        """The layout whose "print_type" (else "id") equals the order's printType."""
+        want = str(print_type if print_type is not None else "").strip()
+        if not want:
+            return None
+        for lay in self.layouts or []:
+            key = lay.get("print_type", lay.get("id"))
+            if str(key if key is not None else "").strip() == want:
+                return lay
+        return None
+
+    def _coupon_reject(self, title, body):
+        self.cp_status.setText(" ")
+        self._show_popup(self._coupon_screen, title,
+                         body + "\nSilakan panggil karyawan kami ya, Kak.")
+
+    def _coupon_submit(self):
+        if self._coupon_job is not None:
+            return                                   # still checking
+        code = self.cp_field.text().strip()
+        if not code:
+            self.cp_status.setText("Kodenya belum diisi ya, Kak")
+            return
+        if self.web_bridge is None:
+            LOG.error("[COUPON] BOOTH_SITE_URL is empty: codes cannot be checked")
+            self._coupon_reject("Kode belum bisa dicek",
+                                "Mesin ini belum tersambung ke website.")
+            return
+        job = {"code": code}
+        self._coupon_job = job
+        self.cp_status.setText("Mengecek kode…")
+        self.btn_cp_next.setEnabled(False)
+        self.web_bridge.call("/booth/coupon", {"code": code},
+                             lambda st, data, err: self._coupon_checked(
+                                 job, *coupon_result_from(st, data, err)))
+
+    def _coupon_checked(self, job, status, data):
+        if job is not self._coupon_job:
+            return
+        self._coupon_job = None
+        self.btn_cp_next.setEnabled(True)
+        if self.stack.currentIndex() != self.SCREEN_COUPON:
+            return
+        code = job["code"]
+        if status == "not_found":
+            LOG.info(f"[COUPON] {code}: not found")
+            self._coupon_reject("Kode tidak ditemukan", "Kode ini tidak terdaftar.")
+            return
+        if status == "not_paid":
+            LOG.info(f"[COUPON] {code}: order not paid")
+            self._coupon_reject("Kode belum aktif", "Pesanan untuk kode ini belum lunas.")
+            return
+        if status != "ok":
+            self._coupon_reject("Kode belum bisa dicek", data)
+            return
+        lay = self._layout_for_print_type(data.get("print_type"))
+        if lay is None:
+            LOG.warning(f"[COUPON] {code}: printType {data.get('print_type')!r} has no layout "
+                        f"on this machine")
+            self._coupon_reject("Frame tidak tersedia",
+                                "Frame untuk kode ini tidak ada di mesin ini.")
+            return
+        try:
+            prints = max(1, int(data.get("print_count") or 1))
+        except (TypeError, ValueError):
+            prints = 1
+        left = self._paper_left() if hasattr(self, "dnp") else None
+        if left is not None and left < prints:
+            LOG.warning(f"[COUPON] {code}: needs {prints} sheet(s), printer has {left}")
+            self._coupon_reject("Kertas tidak cukup",
+                                f"Kode ini untuk {prints} cetak, kertas di printer tinggal {left}.")
+            return
+        self._coupon = {"code": code, "order_id": data.get("order_id"),
+                        "print_type": data.get("print_type"), "print_count": prints}
+        LOG.info(f"[COUPON] {code} ok: order {data.get('order_id')}, layout {lay.get('id')}, "
+                 f"{prints} print(s)")
+        self.cp_status.setText(f"✓ Kode valid · {lay.get('name', '')} · {prints} cetak")
+        self._apply_layout(lay)
+        self._customer = {}
+        self._promo = None
+        self._payment_info = None
+        self._session_access_code = code
+        QTimer.singleShot(900, lambda: self.stack.currentIndex() == self.SCREEN_COUPON
+                          and self._coupon and self._access_done())
+
     def _flush_sessions_now(self):
         if self.web_bridge is not None:
             self._flush_sessions_bridge()
@@ -4565,7 +4955,7 @@ class MainWindow(QMainWindow):
         self._set_payment_qr(text=res.get("qr_string"), png_bytes=png)
         if self.qris.mock:
             self.pay_status.setText("MODE DEMO — QR ini bukan pembayaran asli "
-                                    "(Server Key Midtrans belum diisi)")
+                                    "(key QRIS belum diisi)")
         self._pay_tick.start()
         self._payment_tick()
 
@@ -5621,13 +6011,13 @@ class MainWindow(QMainWindow):
         """Most photos the user may keep. With a bonus price every shot can be
         kept (the ones above the free limit are paid); otherwise poses + bonus."""
         N = self.shots_per_session
-        if PAYMENT_ENABLED and _price(self.current_layout, "bonus_price") > 0:
+        if self._charges_on() and _price(self.current_layout, "bonus_price") > 0:
             return len(self.all_shots)
         return min(len(self.all_shots), N + max(0, int(getattr(self, "extra_shots", 0) or 0)))
 
     def _pick_paid_count(self):
         """(paid photos, amount) for the current pick, minus already-paid ones."""
-        if not PAYMENT_ENABLED:
+        if not self._charges_on():
             return 0, 0
         lay = self.current_layout or {}
         n = max(0, len(self._pick_order) - _free_photos(lay, self.shots_per_session)
@@ -5642,7 +6032,7 @@ class MainWindow(QMainWindow):
         self._populate_pick_grid()
         rng = f"{N}" if M <= N else f"{N}\u2013{M}"
         lay = self.current_layout or {}
-        bp = _price(lay, "bonus_price") if PAYMENT_ENABLED else 0
+        bp = _price(lay, "bonus_price") if self._charges_on() else 0
         free = _free_photos(lay, N)
         bonus_txt = (f"  \u00b7  gratis {free} foto, foto ke-{free + 1} dst {_rp(bp)}/foto"
                      if bp and M > free else "")
@@ -5845,7 +6235,7 @@ class MainWindow(QMainWindow):
             return
         # Bonus photos (kept above the package's free photos) are paid here,
         # before the frame screen. Only photos not paid for yet are charged.
-        if PAYMENT_ENABLED:
+        if self._charges_on():
             bonus_n, amount = self._pick_paid_count()
             if amount > 0:
                 self._begin_payment(amount, f"Foto bonus: {bonus_n} foto",
@@ -6135,7 +6525,7 @@ class MainWindow(QMainWindow):
     def _goto_print(self):
         # Extra prints cost extra: pay that first (QRIS),
         # then continue. Cancel/timeout returns to the frame screen.
-        if PAYMENT_ENABLED and not self._extras_cleared:
+        if self._charges_on() and not self._extras_cleared:
             amount, desc = self._extras_charge()
             if amount > 0:
                 self._begin_payment(amount, desc, on_paid=self._extras_paid,
@@ -6193,7 +6583,10 @@ class MainWindow(QMainWindow):
         self._pending_frame_n = self.shots_per_session
         self._pending_filter = getattr(self, "current_filter", "none")
         self._pending_indiv_fx = self.chk_indiv_fx.isChecked()
-        self._pending_copies = 1 + max(0, int(getattr(self, "extra_prints", 0) or 0))
+        coupon = getattr(self, "_coupon", None)
+        self._pending_coupon = dict(coupon) if coupon else None
+        self._pending_copies = (max(1, int(coupon.get("print_count") or 1)) if coupon else
+                                1 + max(0, int(getattr(self, "extra_prints", 0) or 0)))
         self._pending_frame = Path(self.overlay_path).stem if getattr(self, "overlay_path", None) else ""
         self._pending_customer = dict(getattr(self, "_customer", {}) or {})
         self._pending_promo = dict(getattr(self, "_promo", None) or {})
@@ -6477,11 +6870,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             LOG.error(f"[STATS] record failed: {e}")
             stats = None
-        try:
-            queue_session_upload(self._session_db_record("done"))
-        except Exception as e:
-            LOG.error(f"[DB] session record failed: {e}")
+        if not getattr(self, "_pending_coupon", None):
+            try:
+                queue_session_upload(self._session_db_record("done"))
+            except Exception as e:
+                LOG.error(f"[DB] session record failed: {e}")
         self._customer = {}
+        self._coupon = None
 
         # Upload the stats file to the GDrive ROOT folder (overwrite each time)
         # so the owner can check session count remotely from a phone.
@@ -6593,6 +6988,7 @@ class MainWindow(QMainWindow):
     def _reset_to_home(self):
         self._customer = {}
         self._promo = None
+        self._coupon = None
         self._session_id = None
         self.is_reviewing = False
         self.is_reviewing_final = False

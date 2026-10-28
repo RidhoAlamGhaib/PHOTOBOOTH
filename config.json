@@ -123,6 +123,10 @@
   "access_code": {
     "mode": "free"
   },
+  "payment": {
+    "mode": "qris",
+    "qris_provider": "midtrans"
+  },
   "booth_name": "NEO-01",
   "outlet": "",
   "admin": {

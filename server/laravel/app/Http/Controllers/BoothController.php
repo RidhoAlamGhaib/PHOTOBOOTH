@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\Log;
  * anti-bot check sees a real browser), then posts from inside that page:
  *   POST /booth/promo    {"code": "..."}            -> is the promo code valid?
  *   POST /booth/session  {session_id, customer, ...} -> customers / orders / order_items
- * Both need the X-Api-Key header (BOOTH_API_KEY in .env) and the page's CSRF token.
+ *   POST /booth/coupon   {"code": "..."}            -> order_items row for a paid order
+ * All need the X-Api-Key header (BOOTH_API_KEY in .env) and the page's CSRF token.
  */
 class BoothController extends Controller
 {
@@ -69,6 +70,45 @@ class BoothController extends Controller
             'nama'    => $p->nama,
             'diskon'  => (int) preg_replace('/[^0-9]/', '', (string) $p->diskon),
             'percent' => in_array($type, self::percentTypes(), true) || str_contains((string) $p->diskon, '%'),
+        ]);
+    }
+
+    /**
+     * Coupon mode: the code the website generated for an order (order_items.code).
+     * Valid when its order is paid; the booth picks the layout from printType and
+     * prints printCount sheets. Read-only: nothing is marked used here.
+     */
+    public function coupon(Request $r)
+    {
+        if (!$this->authorized($r)) {
+            return response()->json(['error' => 'unauthorized'], 401);
+        }
+        $code = trim((string) $r->input('code', ''));
+        $notFound = ['valid' => false, 'reason' => 'not_found', 'message' => 'Kode tidak ditemukan'];
+        if ($code === '' || mb_strlen($code) > 255) {
+            return response()->json($notFound, 404);
+        }
+        $item = DB::table('order_items')
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('order_items.code', $code)
+            ->orderByDesc('order_items.id')
+            ->select('order_items.id', 'order_items.order_id', 'order_items.product_id',
+                     'order_items.printType', 'order_items.printCount', 'orders.status')
+            ->first();
+        if (!$item) {
+            return response()->json($notFound, 404);
+        }
+        if (strtolower(trim((string) $item->status)) !== 'paid') {
+            return response()->json(['valid' => false, 'reason' => 'not_paid',
+                                     'message' => 'Pesanan belum lunas'], 409);
+        }
+        return response()->json([
+            'valid'       => true,
+            'order_id'    => (int) $item->order_id,
+            'item_id'     => (int) $item->id,
+            'product_id'  => $item->product_id !== null ? (int) $item->product_id : null,
+            'print_type'  => $item->printType,
+            'print_count' => (int) $item->printCount,
         ]);
     }
 

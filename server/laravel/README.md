@@ -5,8 +5,10 @@ The booth app opens `/booth/bridge` in a hidden browser, so the hosting's anti-b
 
 - `POST /booth/promo`   `{"code": "..."}`: checks the `promos` table
 - `POST /booth/session` session record: writes `customers` / `orders` / `order_items`
+- `POST /booth/coupon`  `{"code": "..."}`: coupon mode, finds `order_items.code` whose order is `paid`
+  and returns `print_type` (printType) and `print_count` (printCount). Read-only.
 
-Both use the page's CSRF token plus the `X-Api-Key` header.
+All use the page's CSRF token plus the `X-Api-Key` header.
 
 ## Files (copy into the Laravel project)
 
@@ -14,7 +16,7 @@ Both use the page's CSRF token plus the `X-Api-Key` header.
 |---|---|
 | `resources/views/booth/bridge.blade.php` | `resources/views/booth/bridge.blade.php` |
 | `app/Http/Controllers/BoothController.php` | `app/Http/Controllers/BoothController.php` |
-| `routes/booth.php` | paste its 3 `Route::` lines (+ the `use` line) into `routes/web.php` |
+| `routes/booth.php` | paste its 4 `Route::` lines (+ the `use` line) into `routes/web.php` |
 
 ## Settings
 
@@ -42,3 +44,17 @@ Build with `PyQtWebEngine` installed (see `build.md`). Log lines: `[WEB] using h
 
 Check in a normal browser: `https://neophotoindonesia.my.id/booth/bridge` should show
 "NEO PHOTO booth bridge".
+
+## Coupon mode
+
+`config.json` on the booth: `"payment": {"mode": "coupon"}` (`"qris"` = normal QRIS flow).
+The customer types the code; the booth asks `/booth/coupon` and:
+
+- code unknown, or order not `paid` -> popup, "panggil karyawan"
+- `printType` must equal a layout's `"print_type"` in the booth's config (or its `"id"` when
+  `print_type` is not set), otherwise popup "Frame tidak tersedia"
+- prints `printCount` sheets; no contact form, no QRIS, no paid bonus photos / extra prints,
+  nothing is written back to the database
+
+Codes are not marked as used yet: one-time use needs a column on `order_items` (e.g.
+`redeemed_at`), checked and set in `BoothController::coupon()`.
