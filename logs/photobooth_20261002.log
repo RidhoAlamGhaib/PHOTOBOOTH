@@ -38,189 +38,47 @@
 2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
 2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
 2026-10-02 00:25:10 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-<<<<<<< HEAD
-2026-10-02 09:22:39 [INFO] root: ============================================================
-2026-10-02 09:22:39 [INFO] root: Photobooth Ceria starting up
-2026-10-02 09:22:39 [INFO] root:   Python:    3.13.6
-2026-10-02 09:22:39 [INFO] root:   Platform:  Windows 11
-2026-10-02 09:22:39 [INFO] root:   Frozen:    False
-2026-10-02 09:22:39 [INFO] root:   BASE_DIR:  C:\Users\Asus\PHOTOBOOTH
-2026-10-02 09:22:39 [INFO] root:   Log file:  C:\Users\Asus\PHOTOBOOTH\logs\photobooth_20261002.log
-2026-10-02 09:22:39 [INFO] root: ============================================================
-2026-10-02 09:22:39 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
-2026-10-02 09:22:39 [INFO] root: [UI] screen 2880x1704 — no scaling needed
-2026-10-02 09:22:41 [INFO] root: [CAMERA] config camera.source='canon' index='auto'
-2026-10-02 09:22:41 [INFO] root: [CAMERA] source=canon (Canon DSLR via EDSDK)
-2026-10-02 09:22:41 [ERROR] canon_edsdk: [CANON] startup failed: No Canon camera found. Is it on, in a photo mode (not video/playback), and USB-connected?
-2026-10-02 09:22:41 [INFO] canon_edsdk: [CANON] EDSDK stopped, camera released
-2026-10-02 09:22:42 [ERROR] root: [CANON] camera lost: Camera startup failed: No Canon camera found. Is it on, in a photo mode (not video/playback), and USB-connected? - EDSDK stopped
-2026-10-02 09:23:02 [INFO] root: ============================================================
-2026-10-02 09:23:02 [INFO] root: Photobooth Ceria starting up
-2026-10-02 09:23:02 [INFO] root:   Python:    3.13.6
-2026-10-02 09:23:02 [INFO] root:   Platform:  Windows 11
-2026-10-02 09:23:02 [INFO] root:   Frozen:    False
-2026-10-02 09:23:02 [INFO] root:   BASE_DIR:  C:\Users\Asus\PHOTOBOOTH
-2026-10-02 09:23:02 [INFO] root:   Log file:  C:\Users\Asus\PHOTOBOOTH\logs\photobooth_20261002.log
-2026-10-02 09:23:02 [INFO] root: ============================================================
-2026-10-02 09:23:03 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
-2026-10-02 09:23:03 [INFO] root: [UI] screen 2880x1704 — no scaling needed
-2026-10-02 09:23:04 [INFO] root: [CAMERA] config camera.source='opencv' index='auto'
-2026-10-02 09:23:04 [INFO] root: [CAMERA] Scanning for available cameras (indices 0-9)...
-2026-10-02 09:23:05 [INFO] root: [CAMERA] Index 0 (DSHOW): OK [640x480]
-2026-10-02 09:23:07 [INFO] root: [CAMERA] Found 1 camera(s) at index(es): [0]
-2026-10-02 09:23:07 [INFO] root: [CAMERA] Auto-selected camera at index 0
-2026-10-02 09:23:07 [INFO] root: [CAMERA] Opened index 0 with DSHOW backend
-2026-10-02 09:23:08 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:23:08 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:23:08 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:23:11 [INFO] root: [CAMERA] auto-detect picked 1280x720
-2026-10-02 09:23:11 [INFO] root: [CAMERA] Active res: 1280x720 (requested 1280x720)
-2026-10-02 09:24:38 [INFO] root: [PICK] kept shots [1, 2, 3, 6] of 6
-2026-10-02 09:24:38 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:24:38 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:24:38 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:24:56 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:24:56 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:24:56 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26552
-2026-10-02 09:24:57 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:24:57 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:24:57 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 25618
-2026-10-02 09:24:59 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:24:59 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:24:59 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:25:05 [INFO] root: [CAMERA] Camera thread stopped
-2026-10-02 09:26:08 [INFO] root: ============================================================
-2026-10-02 09:26:08 [INFO] root: Photobooth Ceria starting up
-2026-10-02 09:26:08 [INFO] root:   Python:    3.13.6
-2026-10-02 09:26:08 [INFO] root:   Platform:  Windows 11
-2026-10-02 09:26:08 [INFO] root:   Frozen:    False
-2026-10-02 09:26:08 [INFO] root:   BASE_DIR:  C:\Users\Asus\PHOTOBOOTH
-2026-10-02 09:26:08 [INFO] root:   Log file:  C:\Users\Asus\PHOTOBOOTH\logs\photobooth_20261002.log
-2026-10-02 09:26:08 [INFO] root: ============================================================
-2026-10-02 09:26:08 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
-2026-10-02 09:26:08 [INFO] root: [UI] screen 2880x1704 — no scaling needed
-2026-10-02 09:26:10 [INFO] root: [CAMERA] config camera.source='opencv' index='auto'
-2026-10-02 09:26:10 [INFO] root: [CAMERA] Scanning for available cameras (indices 0-9)...
-2026-10-02 09:26:11 [INFO] root: [CAMERA] Index 0 (DSHOW): OK [640x480]
-2026-10-02 09:26:12 [INFO] root: [CAMERA] Found 1 camera(s) at index(es): [0]
-2026-10-02 09:26:12 [INFO] root: [CAMERA] Auto-selected camera at index 0
-2026-10-02 09:26:13 [INFO] root: [CAMERA] Opened index 0 with DSHOW backend
-2026-10-02 09:26:16 [INFO] root: [CAMERA] auto-detect picked 1280x720
-2026-10-02 09:26:16 [INFO] root: [CAMERA] Active res: 1280x720 (requested 1280x720)
-2026-10-02 09:26:24 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:26:24 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:26:24 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:26:52 [INFO] root: [CAMERA] Camera thread stopped
-2026-10-02 09:29:17 [INFO] root: ============================================================
-2026-10-02 09:29:17 [INFO] root: Photobooth Ceria starting up
-2026-10-02 09:29:17 [INFO] root:   Python:    3.13.6
-2026-10-02 09:29:18 [INFO] root:   Platform:  Windows 11
-2026-10-02 09:29:18 [INFO] root:   Frozen:    False
-2026-10-02 09:29:18 [INFO] root:   BASE_DIR:  C:\Users\Asus\PHOTOBOOTH
-2026-10-02 09:29:18 [INFO] root:   Log file:  C:\Users\Asus\PHOTOBOOTH\logs\photobooth_20261002.log
-2026-10-02 09:29:18 [INFO] root: ============================================================
-2026-10-02 09:29:18 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
-2026-10-02 09:29:18 [INFO] root: [UI] screen 2880x1704 — no scaling needed
-2026-10-02 09:29:19 [INFO] root: [CAMERA] config camera.source='opencv' index='auto'
-2026-10-02 09:29:19 [INFO] root: [CAMERA] Scanning for available cameras (indices 0-9)...
-2026-10-02 09:29:20 [INFO] root: [CAMERA] Index 0 (DSHOW): OK [640x480]
-2026-10-02 09:29:22 [INFO] root: [CAMERA] Found 1 camera(s) at index(es): [0]
-2026-10-02 09:29:22 [INFO] root: [CAMERA] Auto-selected camera at index 0
-2026-10-02 09:29:22 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:29:22 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:29:22 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:29:22 [INFO] root: [CAMERA] Opened index 0 with DSHOW backend
-2026-10-02 09:29:26 [INFO] root: [CAMERA] auto-detect picked 1280x720
-2026-10-02 09:29:26 [INFO] root: [CAMERA] Active res: 1280x720 (requested 1280x720)
-2026-10-02 09:29:34 [INFO] root: [CAMERA] Camera thread stopped
-2026-10-02 09:30:33 [INFO] root: ============================================================
-2026-10-02 09:30:33 [INFO] root: Photobooth Ceria starting up
-2026-10-02 09:30:33 [INFO] root:   Python:    3.13.6
-2026-10-02 09:30:34 [INFO] root:   Platform:  Windows 11
-2026-10-02 09:30:34 [INFO] root:   Frozen:    False
-2026-10-02 09:30:34 [INFO] root:   BASE_DIR:  C:\Users\Asus\PHOTOBOOTH
-2026-10-02 09:30:34 [INFO] root:   Log file:  C:\Users\Asus\PHOTOBOOTH\logs\photobooth_20261002.log
-2026-10-02 09:30:34 [INFO] root: ============================================================
-2026-10-02 09:30:34 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
-2026-10-02 09:30:34 [INFO] root: [UI] screen 2880x1704 — no scaling needed
-2026-10-02 09:30:35 [INFO] root: [CAMERA] config camera.source='opencv' index='auto'
-2026-10-02 09:30:35 [INFO] root: [CAMERA] Scanning for available cameras (indices 0-9)...
-2026-10-02 09:30:37 [INFO] root: [CAMERA] Index 0 (DSHOW): OK [640x480]
-2026-10-02 09:30:40 [INFO] root: [CAMERA] Found 1 camera(s) at index(es): [0]
-2026-10-02 09:30:40 [INFO] root: [CAMERA] Auto-selected camera at index 0
-2026-10-02 09:30:41 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:30:41 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:30:41 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:30:41 [INFO] root: [CAMERA] Opened index 0 with DSHOW backend
-2026-10-02 09:30:45 [INFO] root: [CAMERA] auto-detect picked 1280x720
-2026-10-02 09:30:45 [INFO] root: [CAMERA] Active res: 1280x720 (requested 1280x720)
-2026-10-02 09:31:58 [INFO] root: [PICK] kept shots [6, 5, 4, 2] of 6
-2026-10-02 09:31:59 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:31:59 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:31:59 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:34:30 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:34:30 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:34:30 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:34:42 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): oauth2.googleapis.com:443
-2026-10-02 09:34:44 [DEBUG] urllib3.connectionpool: https://oauth2.googleapis.com:443 "POST /token HTTP/2.0" 400 79
-2026-10-02 09:34:44 [DEBUG] requests_oauthlib.oauth2_session: Generated new state y30TcAKgre5ziN5qBVRKdBMbwB9CIZ.
-2026-10-02 09:34:50 [INFO] google_auth_oauthlib.flow: "GET /?state=y30TcAKgre5ziN5qBVRKdBMbwB9CIZ&iss=https://accounts.google.com&code=4/0AXlqoi4y0mRc5tzNEUnvPYlxGw2yZqgTnLZFkZ7solJnic8HnNCwmtKQwdP3FXYwK9ObZg&scope=https://www.googleapis.com/auth/drive.file HTTP/1.1" 200 65
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Encoding `client_id` "220645271431-5ktpn286ifdt03p5mc7tl8dtp1o2n1ca.apps.googleusercontent.com" with `client_secret` as Basic auth credentials.
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Requesting url https://oauth2.googleapis.com/token using method POST.
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Supplying headers {'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded'} and data {'grant_type': 'authorization_code', 'code': '4/0AXlqoi4y0mRc5tzNEUnvPYlxGw2yZqgTnLZFkZ7solJnic8HnNCwmtKQwdP3FXYwK9ObZg', 'redirect_uri': 'http://localhost:54384/'}
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Passing through key word arguments {'timeout': None, 'auth': <requests.auth.HTTPBasicAuth object at 0x00000270C4AF2120>, 'verify': None, 'proxies': None, 'cert': None}.
-2026-10-02 09:34:50 [DEBUG] urllib3.connectionpool: Starting new HTTPS connection (1): oauth2.googleapis.com:443
-2026-10-02 09:34:50 [DEBUG] urllib3.connectionpool: https://oauth2.googleapis.com:443 "POST /token HTTP/2.0" 200 429
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Request to fetch token completed with status 200.
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Request url was https://oauth2.googleapis.com/token
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Request headers were {'User-Agent': 'python-requests/2.32.5', 'Accept-Encoding': 'gzip, deflate', 'Accept': 'application/json', 'Connection': 'keep-alive', 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': '157', 'Authorization': 'Basic MjIwNjQ1MjcxNDMxLTVrdHBuMjg2aWZkdDAzcDVtYzd0bDhkdHAxbzJuMWNhLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tOkdPQ1NQWC1VNFdZM09lbEZ0cHFxV1F6dlhodVpDZzB1V0h5'}
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Request body was grant_type=authorization_code&code=4%2F0AXlqoi4y0mRc5tzNEUnvPYlxGw2yZqgTnLZFkZ7solJnic8HnNCwmtKQwdP3FXYwK9ObZg&redirect_uri=http%3A%2F%2Flocalhost%3A54384%2F
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Response headers were {'date': 'Fri, 02 Oct 2026 02:34:50 GMT', 'expires': 'Mon, 01 Jan 1990 00:00:00 GMT', 'pragma': 'no-cache', 'cache-control': 'no-cache, no-store, max-age=0, must-revalidate', 'content-type': 'application/json; charset=utf-8', 'vary': 'Origin, X-Origin, Referer', 'content-encoding': 'gzip', 'server': 'scaffolding on HTTPServer2', 'content-length': '429', 'x-xss-protection': '0', 'x-frame-options': 'SAMEORIGIN', 'x-content-type-options': 'nosniff', 'alt-svc': 'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000'} and content {
-  "access_token": "ya29.a0AX07CmuPYn_0GE9U20CvR83S-vaISFzbwlxSP-SxMmNog8C3JJvQ6RuXYKUZ7RX964_CJCMsVcnuVnkOAUEPCO5tyycMxjYr0wxSCv_ADByQcHFvJY9sxm2GDAB_RhHiAqN649s_oqz6UhEXTKxEjXW-R3LufjvcCthAWSxBEzr0OlluhOxT-YCxn_RSYuM1093AtoIaCgYKAawSARUSFQHGX2MiZO7fFIYjvYfOSptZFNAQ-A0206",
-  "expires_in": 3599,
-  "refresh_token": "1//0g5obr6X0vH9tCgYIARAAGBASNwF-L9IrNqtgYllieVs-kWgfjI6vagjJnfZMyS4yQv-MO6K2WjXL0tK8XxrT8WAADHzR-4ORBf4",
-  "scope": "https://www.googleapis.com/auth/drive.file",
-  "token_type": "Bearer"
-}.
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Invoking 0 token response hooks.
-2026-10-02 09:34:50 [DEBUG] requests_oauthlib.oauth2_session: Obtained token {'access_token': 'ya29.a0AX07CmuPYn_0GE9U20CvR83S-vaISFzbwlxSP-SxMmNog8C3JJvQ6RuXYKUZ7RX964_CJCMsVcnuVnkOAUEPCO5tyycMxjYr0wxSCv_ADByQcHFvJY9sxm2GDAB_RhHiAqN649s_oqz6UhEXTKxEjXW-R3LufjvcCthAWSxBEzr0OlluhOxT-YCxn_RSYuM1093AtoIaCgYKAawSARUSFQHGX2MiZO7fFIYjvYfOSptZFNAQ-A0206', 'expires_in': 3599, 'refresh_token': '1//0g5obr6X0vH9tCgYIARAAGBASNwF-L9IrNqtgYllieVs-kWgfjI6vagjJnfZMyS4yQv-MO6K2WjXL0tK8XxrT8WAADHzR-4ORBf4', 'scope': ['https://www.googleapis.com/auth/drive.file'], 'token_type': 'Bearer', 'expires_at': 1790912090}.
-2026-10-02 09:34:50 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files?fields=id%2C+webViewLink&supportsAllDrives=true&alt=json
-2026-10-02 09:34:52 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1DzegRklKYX3LLsk02HKrjL8WzikGyiFy/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:34:53 [INFO] root: [GDRIVE] subfolder created: https://drive.google.com/drive/folders/1DzegRklKYX3LLsk02HKrjL8WzikGyiFy
-2026-10-02 09:34:53 [INFO] root: [GDRIVE] no thank_you.png / thank_you.txt found
-2026-10-02 09:34:53 [INFO] root: [SAVE] stamped PNG (print disabled): C:\Users\Asus\PHOTOBOOTH\captures\FINAL_20261002_093430.png
-2026-10-02 09:34:54 [INFO] root: [INDIV] saved 6/6 to C:\Users\Asus\PHOTOBOOTH\captures\SESSION_20261002_093430
-2026-10-02 09:34:56 [INFO] root: [STATS] session #2 logged @ 2026-10-02 09:34:56
-2026-10-02 09:34:56 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:34:56 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:34:56 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:34:56 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:34:58 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/15ZcM8zCIrimMi3DtMiPkKuKRZCocA0X1/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:34:58 [INFO] root: [STATS] uploaded to GDrive root
-2026-10-02 09:34:59 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
-2026-10-02 09:34:59 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
-2026-10-02 09:34:59 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
-2026-10-02 09:35:01 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files?fields=id%2C+webViewLink&supportsAllDrives=true&alt=json
-2026-10-02 09:35:02 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1BxdOgBmNc5IrkBtDU4A73zY6DYW-Wrq9/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:03 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:06 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1g6YEvIWOTRIsHE04gWX-3QYgEK6XPdSy/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:07 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:09 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1F9JLmzG-iLMfboWekjR9rWHepsP7HvVU/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:09 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:11 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1I0CAsDNykpuMmYEtC1Rgu7cEctzBKXmg/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:12 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:14 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1gBG7_z4xiaYiQv3dHoH6PoT29xPht1vx/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:14 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:16 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1qtR9mHPosT380YrcjQFikFWbZDZCIoUC/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:16 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:18 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1DBLM6PnK0SpRWu2oZ0qBBeQDbBI65QI3/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:19 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:21 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1Ycl8Wq67leQvxlQplNnKOCS8-TN8jVqa/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:21 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:23 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1Bj_R6vjDz7Jri43T7qNah-xsMpCp6QwB/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:24 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/upload/drive/v3/files?fields=id%2C+webViewLink%2C+webContentLink&supportsAllDrives=true&alt=json&uploadType=multipart
-2026-10-02 09:35:25 [DEBUG] googleapiclient.discovery: URL being requested: POST https://www.googleapis.com/drive/v3/files/1Au-gXPyjWvmJG30bpct5pXO9GrcKigSb/permissions?supportsAllDrives=true&alt=json
-2026-10-02 09:35:26 [INFO] root: [GDRIVE] session done: https://drive.google.com/drive/folders/1DzegRklKYX3LLsk02HKrjL8WzikGyiFy (9/9 ok)
-2026-10-02 09:39:23 [INFO] root: [CAMERA] Camera thread stopped
-=======
->>>>>>> 0b73159f45439cd16136815126e03d7a2df8719d
+2026-10-02 11:35:10 [INFO] root: ============================================================
+2026-10-02 11:35:10 [INFO] root: Photobooth Ceria starting up
+2026-10-02 11:35:10 [INFO] root:   Python:    3.13.6
+2026-10-02 11:35:10 [INFO] root:   Platform:  Windows 11
+2026-10-02 11:35:10 [INFO] root:   Frozen:    False
+2026-10-02 11:35:10 [INFO] root:   BASE_DIR:  C:\Users\Asus\PHOTOBOOTH
+2026-10-02 11:35:10 [INFO] root:   Log file:  C:\Users\Asus\PHOTOBOOTH\logs\photobooth_20261002.log
+2026-10-02 11:35:10 [INFO] root: ============================================================
+2026-10-02 11:35:11 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
+2026-10-02 11:35:11 [INFO] root: [UI] screen 2880x1704 — no scaling needed
+2026-10-02 11:35:16 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-02 11:35:16 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-02 11:35:16 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-02 11:35:16 [INFO] root: [CAMERA] config camera.source='canon' index='auto'
+2026-10-02 11:35:16 [INFO] root: [CAMERA] source=canon (Canon DSLR via EDSDK)
+2026-10-02 11:35:16 [INFO] root: [CAMERA] opened for new session
+2026-10-02 11:35:16 [ERROR] canon_edsdk: [CANON] startup failed: No Canon camera found. Is it on, in a photo mode (not video/playback), and USB-connected?
+2026-10-02 11:35:16 [INFO] canon_edsdk: [CANON] EDSDK stopped, camera released
+2026-10-02 11:35:16 [ERROR] root: [CANON] camera lost: Camera startup failed: No Canon camera found. Is it on, in a photo mode (not video/playback), and USB-connected? - EDSDK stopped
+2026-10-02 11:35:20 [INFO] root: [CAMERA] released (session ended)
+2026-10-02 11:36:30 [INFO] root: ============================================================
+2026-10-02 11:36:30 [INFO] root: Photobooth Ceria starting up
+2026-10-02 11:36:30 [INFO] root:   Python:    3.13.6
+2026-10-02 11:36:30 [INFO] root:   Platform:  Windows 11
+2026-10-02 11:36:30 [INFO] root:   Frozen:    False
+2026-10-02 11:36:30 [INFO] root:   BASE_DIR:  C:\Users\Asus\PHOTOBOOTH
+2026-10-02 11:36:30 [INFO] root:   Log file:  C:\Users\Asus\PHOTOBOOTH\logs\photobooth_20261002.log
+2026-10-02 11:36:30 [INFO] root: ============================================================
+2026-10-02 11:36:30 [INFO] root: [FONT] ui='Segoe UI' display='Segoe UI Black'
+2026-10-02 11:36:30 [INFO] root: [UI] screen 2880x1704 — no scaling needed
+2026-10-02 11:36:43 [DEBUG] PIL.PngImagePlugin: STREAM b'IHDR' 16 13
+2026-10-02 11:36:43 [DEBUG] PIL.PngImagePlugin: STREAM b'pHYs' 41 9
+2026-10-02 11:36:43 [DEBUG] PIL.PngImagePlugin: STREAM b'IDAT' 62 26164
+2026-10-02 11:36:43 [INFO] root: [CAMERA] config camera.source='opencv' index='auto'
+2026-10-02 11:36:43 [INFO] root: [CAMERA] opened for new session
+2026-10-02 11:36:43 [INFO] root: [CAMERA] Scanning for available cameras (indices 0-9)...
+2026-10-02 11:36:45 [INFO] root: [CAMERA] Index 0 (DSHOW): OK [640x480]
+2026-10-02 11:36:46 [INFO] root: [CAMERA] Found 1 camera(s) at index(es): [0]
+2026-10-02 11:36:46 [INFO] root: [CAMERA] Auto-selected camera at index 0
+2026-10-02 11:36:47 [INFO] root: [CAMERA] Opened index 0 with DSHOW backend
+2026-10-02 11:36:50 [INFO] root: [CAMERA] auto-detect picked 1280x720
+2026-10-02 11:36:50 [INFO] root: [CAMERA] Active res: 1280x720 (requested 1280x720)
+2026-10-02 11:37:00 [INFO] root: [CAMERA] released (session ended)
+2026-10-02 11:37:00 [INFO] root: [CAMERA] Camera thread stopped
