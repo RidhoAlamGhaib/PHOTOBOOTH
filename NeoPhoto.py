@@ -297,9 +297,12 @@ _FALLBACK_DEFAULTS = {
     #              printType picks the layout (layout "print_type", else its "id"),
     #              printCount = sheets printed; nothing else to pay, nothing sent back.
     # qris_provider: "midtrans" or "bca" (keys are set in NeoPhoto.py, not here).
+    # coupon_start_minutes: after the code is accepted, time to press MULAI FOTO;
+    # the code is used up only when MULAI is pressed (timeout/cancel keeps it unused).
     "payment": {
         "mode": "qris",
         "qris_provider": "midtrans",
+        "coupon_start_minutes": 5,
     },
     # This photo machine's name / number and the outlet (location) it stands in;
     # saved on every order in the online database (orders.machine, orders.outlet).
@@ -729,7 +732,8 @@ def coupon_result_from(status, data, err):
     if status == 200 and isinstance(data, dict) and data.get("valid"):
         return "ok", data
     if status in (404, 409) and isinstance(data, dict) and "valid" in data:
-        return ("not_paid" if data.get("reason") == "not_paid" else "not_found"), \
+        reason = data.get("reason")
+        return (reason if reason in ("not_paid", "used") else "not_found"), \
             data.get("message") or "Kode tidak ditemukan"
     hint = _body_hint((err or "").encode("utf-8")) if err else json.dumps(data)[:200]
     LOG.warning(f"[COUPON] bridge check failed: HTTP {status}: {hint}")
@@ -4713,6 +4717,73 @@ class MainWindow(QMainWindow):
         self._coupon_screen = screen
         self._coupon = None
         self._coupon_job = None
+        self._build_coupon_start_screen()
+
+    def _build_coupon_start_screen(self):
+        """Code checked: the customer presses MULAI to start (only then is the code
+        used up). No press within payment.coupon_start_minutes -> back home."""
+        screen = QWidget()
+        screen.setStyleSheet("background: transparent;")
+        root = QVBoxLayout(screen)
+        root.setContentsMargins(80, 40, 80, 40)
+        root.setSpacing(0)
+        root.addStretch(1)
+        title = QLabel("Kode Valid!")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 60px; font-weight: 800; "
+                            f"font-family: '{FONT_DISPLAY}'; background: transparent;")
+        root.addWidget(title)
+        root.addSpacing(10)
+        self.cs_info = QLabel("")
+        self.cs_info.setAlignment(Qt.AlignCenter)
+        self.cs_info.setWordWrap(True)
+        self.cs_info.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 28px; font-weight: 800; "
+                                   f"background: transparent;")
+        root.addWidget(self.cs_info)
+        root.addSpacing(8)
+        hint = QLabel("Sudah siap? Tekan MULAI FOTO kalau semua sudah di depan kamera ya, Kak.")
+        hint.setAlignment(Qt.AlignCenter)
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 22px; font-weight: 600; "
+                           f"background: transparent;")
+        root.addWidget(hint)
+        root.addSpacing(40)
+        self.btn_cs_start = QPushButton("MULAI FOTO")
+        self.btn_cs_start.setFixedSize(480, 120)
+        self.btn_cs_start.setCursor(Qt.PointingHandCursor)
+        self.btn_cs_start.setFocusPolicy(Qt.NoFocus)
+        self.btn_cs_start.setStyleSheet(f"""
+            QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                               stop:0 {COLORS['pink']}, stop:1 {COLORS['lilac']});
+                           color: white; border: 4px solid white; border-radius: 60px;
+                           font-size: 40px; font-weight: 900; }}
+            QPushButton:disabled {{ background: {COLORS['pink_soft']}; }}""")
+        self._add_shadow(self.btn_cs_start, blur=40, y_offset=12, alpha=150)
+        self.btn_cs_start.clicked.connect(self._coupon_start_pressed)
+        root.addWidget(self.btn_cs_start, 0, Qt.AlignHCenter)
+        root.addSpacing(24)
+        self.cs_timer_lbl = QLabel("")
+        self.cs_timer_lbl.setAlignment(Qt.AlignCenter)
+        self.cs_timer_lbl.setStyleSheet(f"color: {COLORS['ink']}; font-size: 26px; font-weight: 800; "
+                                        f"background: transparent;")
+        root.addWidget(self.cs_timer_lbl)
+        root.addSpacing(30)
+        btn_cancel = QPushButton("Batal")
+        btn_cancel.setFixedSize(220, 64)
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setFocusPolicy(Qt.NoFocus)
+        btn_cancel.setStyleSheet(self.btn_cf_back.styleSheet())
+        btn_cancel.clicked.connect(self._coupon_start_cancel)
+        root.addWidget(btn_cancel, 0, Qt.AlignHCenter)
+        root.addStretch(1)
+        self.stack.addWidget(screen)
+        self.SCREEN_COUPON_START = self.stack.indexOf(screen)
+        self._coupon_start_screen = screen
+        self._cs_job = None
+        self._cs_left = 0
+        self._cs_tick = QTimer(self)
+        self._cs_tick.setInterval(1000)
+        self._cs_tick.timeout.connect(self._coupon_start_tick)
 
     def _goto_coupon_input(self):
         self._coupon = None
@@ -4775,6 +4846,10 @@ class MainWindow(QMainWindow):
             LOG.info(f"[COUPON] {code}: order not paid")
             self._coupon_reject("Kode belum aktif", "Pesanan untuk kode ini belum lunas.")
             return
+        if status == "used":
+            LOG.info(f"[COUPON] {code}: already used")
+            self._coupon_reject("Kode sudah dipakai", "Kode ini sudah pernah dipakai foto.")
+            return
         if status != "ok":
             self._coupon_reject("Kode belum bisa dicek", data)
             return
@@ -4796,6 +4871,7 @@ class MainWindow(QMainWindow):
                                 f"Kode ini untuk {prints} cetak, kertas di printer tinggal {left}.")
             return
         self._coupon = {"code": code, "order_id": data.get("order_id"),
+                        "item_id": data.get("item_id"),
                         "print_type": data.get("print_type"), "print_count": prints}
         LOG.info(f"[COUPON] {code} ok: order {data.get('order_id')}, layout {lay.get('id')}, "
                  f"{prints} print(s)")
@@ -4805,8 +4881,93 @@ class MainWindow(QMainWindow):
         self._promo = None
         self._payment_info = None
         self._session_access_code = code
-        QTimer.singleShot(900, lambda: self.stack.currentIndex() == self.SCREEN_COUPON
-                          and self._coupon and self._access_done())
+        QTimer.singleShot(700, lambda: self.stack.currentIndex() == self.SCREEN_COUPON
+                          and self._coupon and self._goto_coupon_start(lay))
+
+    def _goto_coupon_start(self, lay):
+        try:
+            minutes = float(_payment_cfg().get("coupon_start_minutes", 5) or 5)
+        except (TypeError, ValueError):
+            minutes = 5
+        self._cs_left = max(10, int(minutes * 60))
+        self._cs_job = None
+        n = self._coupon["print_count"]
+        self.cs_info.setText(f"{lay.get('name', '')}  \u00b7  {n} cetak")
+        self.btn_cs_start.setEnabled(True)
+        self.btn_cs_start.setText("MULAI FOTO")
+        self._coupon_start_tick(first=True)
+        self._cs_tick.start()
+        self.stack.setCurrentIndex(self.SCREEN_COUPON_START)
+
+    def _coupon_start_tick(self, first=False):
+        if self.stack.currentIndex() != self.SCREEN_COUPON_START and not first:
+            self._cs_tick.stop()
+            return
+        if not first:
+            self._cs_left -= 1
+        if self._cs_left <= 0 and self._cs_job is None:
+            self._cs_tick.stop()
+            LOG.info(f"[COUPON] {(self._coupon or {}).get('code')}: start not pressed in time, "
+                     f"code stays unused")
+            self._reset_to_home()
+            self._show_popup(self.stack.widget(self.SCREEN_HOME), "Waktu habis",
+                             "Kode kamu belum terpakai. Masukkan lagi kodenya kalau sudah siap ya, Kak.")
+            return
+        m, s_ = divmod(max(0, self._cs_left), 60)
+        self.cs_timer_lbl.setText(f"Tekan MULAI dalam {m:02d}:{s_:02d}")
+
+    def _coupon_start_cancel(self):
+        self._cs_tick.stop()
+        self._cs_job = None
+        LOG.info(f"[COUPON] {(self._coupon or {}).get('code')}: cancelled, code stays unused")
+        self._reset_to_home()
+
+    def _coupon_start_pressed(self):
+        """Use the code up on the website, then start the photos."""
+        if self._cs_job is not None or not self._coupon:
+            return
+        c = self._coupon
+        job = {"code": c["code"]}
+        self._cs_job = job
+        self.btn_cs_start.setEnabled(False)
+        self.btn_cs_start.setText("Sebentar\u2026")
+        self.web_bridge.call("/booth/coupon/use", {
+            "code": c["code"], "item_id": c.get("item_id"),
+            "machine": str(CONFIG.get("booth_name", "") or ""),
+            "outlet": str(CONFIG.get("outlet", "") or "")},
+            lambda st, data, err: self._coupon_used(job, *coupon_result_from(st, data, err)))
+
+    def _coupon_used(self, job, status, data):
+        if job is not self._cs_job:
+            return
+        self._cs_job = None
+        if self.stack.currentIndex() != self.SCREEN_COUPON_START or not self._coupon:
+            return
+        code = job["code"]
+        if status == "ok":
+            self._cs_tick.stop()
+            if isinstance(data, dict) and data.get("marked") is False:
+                LOG.warning(f"[COUPON] {code}: starting, NOT marked used "
+                            f"(order_items.used_at column not added yet)")
+            else:
+                LOG.info(f"[COUPON] {code}: marked used, starting")
+            self._access_done()
+            return
+        self.btn_cs_start.setEnabled(True)
+        self.btn_cs_start.setText("MULAI FOTO")
+        if status in ("used", "not_found", "not_paid"):
+            self._cs_tick.stop()
+            LOG.info(f"[COUPON] {code}: cannot be used ({status})")
+            self._reset_to_home()
+            self._show_popup(self.stack.widget(self.SCREEN_HOME), "Kode tidak bisa dipakai",
+                             f"{data}\nSilakan panggil karyawan kami ya, Kak.")
+            return
+        LOG.warning(f"[COUPON] {code}: could not mark used: {data}")
+        if self._cs_left <= 0:
+            self._coupon_start_tick(first=True)       # time ran out while waiting
+            return
+        self._show_popup(self._coupon_start_screen, "Belum bisa mulai",
+                         f"{data}\nCoba tekan MULAI lagi, atau panggil karyawan kami ya, Kak.")
 
     def _flush_sessions_now(self):
         if self.web_bridge is not None:
@@ -7000,6 +7161,9 @@ class MainWindow(QMainWindow):
         self._customer = {}
         self._promo = None
         self._coupon = None
+        if hasattr(self, "_cs_tick"):
+            self._cs_tick.stop()
+            self._cs_job = None
         self._session_id = None
         self.is_reviewing = False
         self.is_reviewing_final = False

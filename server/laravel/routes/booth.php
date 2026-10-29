@@ -7,3 +7,4 @@ Route::get('/booth/bridge', [BoothController::class, 'bridge']);
 Route::post('/booth/session', [BoothController::class, 'session'])->middleware('throttle:120,1');
 Route::post('/booth/promo', [BoothController::class, 'promo'])->middleware('throttle:60,1');
 Route::post('/booth/coupon', [BoothController::class, 'coupon'])->middleware('throttle:60,1');
+Route::post('/booth/coupon/use', [BoothController::class, 'couponUse'])->middleware('throttle:60,1');

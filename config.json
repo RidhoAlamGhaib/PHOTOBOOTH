@@ -125,7 +125,8 @@
   },
   "payment": {
     "mode": "qris",
-    "qris_provider": "midtrans"
+    "qris_provider": "midtrans",
+    "coupon_start_minutes": 5
   },
   "booth_name": "NEO-01",
   "outlet": "",

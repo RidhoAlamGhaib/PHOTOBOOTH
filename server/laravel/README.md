@@ -7,6 +7,8 @@ The booth app opens `/booth/bridge` in a hidden browser, so the hosting's anti-b
 - `POST /booth/session` session record: writes `customers` / `orders` / `order_items`
 - `POST /booth/coupon`  `{"code": "..."}`: coupon mode, finds `order_items.code` whose order is `paid`
   and returns `print_type` (printType) and `print_count` (printCount). Read-only.
+- `POST /booth/coupon/use` `{"code", "item_id", "machine", "outlet"}`: customer pressed MULAI FOTO,
+  sets `order_items.used_at` (+ `used_machine`). Without that column it just answers ok.
 
 All use the page's CSRF token plus the `X-Api-Key` header.
 
@@ -16,7 +18,7 @@ All use the page's CSRF token plus the `X-Api-Key` header.
 |---|---|
 | `resources/views/booth/bridge.blade.php` | `resources/views/booth/bridge.blade.php` |
 | `app/Http/Controllers/BoothController.php` | `app/Http/Controllers/BoothController.php` |
-| `routes/booth.php` | paste its 4 `Route::` lines (+ the `use` line) into `routes/web.php` |
+| `routes/booth.php` | paste its 5 `Route::` lines (+ the `use` line) into `routes/web.php` |
 
 ## Settings
 
@@ -47,14 +49,16 @@ Check in a normal browser: `https://neophotoindonesia.my.id/booth/bridge` should
 
 ## Coupon mode
 
-`config.json` on the booth: `"payment": {"mode": "coupon"}` (`"qris"` = normal QRIS flow).
-The customer types the code; the booth asks `/booth/coupon` and:
+`config.json` on the booth: `"payment": {"mode": "coupon", "coupon_start_minutes": 5}`
+(`"qris"` = normal QRIS flow). The customer types the code; the booth asks `/booth/coupon`:
 
-- code unknown, or order not `paid` -> popup, "panggil karyawan"
+- code unknown, order not `paid`, or `used_at` already set -> popup, "panggil karyawan"
 - `printType` must equal a layout's `"print_type"` in the booth's config (or its `"id"` when
   `print_type` is not set), otherwise popup "Frame tidak tersedia"
-- prints `printCount` sheets; no contact form, no QRIS, no paid bonus photos / extra prints,
-  nothing is written back to the database
+- valid -> "Kode Valid!" screen with a MULAI FOTO button and a countdown
+  (`coupon_start_minutes`). Only MULAI uses the code (`/booth/coupon/use`); Batal or the
+  countdown running out sends the customer home with the code still unused
+- prints `printCount` sheets; no contact form, no QRIS, no paid bonus photos / extra prints
 
-Codes are not marked as used yet: one-time use needs a column on `order_items` (e.g.
-`redeemed_at`), checked and set in `BoothController::coupon()`.
+One-time use needs the columns from `server/booth-api/migration_003_coupon_used.sql`
+(`order_items.used_at`, `used_machine`). Until they exist, codes work but are never marked.

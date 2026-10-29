@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * NEO PHOTO booth <-> website.
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Log;
  *   POST /booth/promo    {"code": "..."}            -> is the promo code valid?
  *   POST /booth/session  {session_id, customer, ...} -> customers / orders / order_items
  *   POST /booth/coupon   {"code": "..."}            -> order_items row for a paid order
+ *   POST /booth/coupon/use {"code", "item_id", ...}  -> marks the code used (MULAI pressed)
  * All need the X-Api-Key header (BOOTH_API_KEY in .env) and the page's CSRF token.
  */
 class BoothController extends Controller
@@ -75,8 +77,9 @@ class BoothController extends Controller
 
     /**
      * Coupon mode: the code the website generated for an order (order_items.code).
-     * Valid when its order is paid; the booth picks the layout from printType and
-     * prints printCount sheets. Read-only: nothing is marked used here.
+     * Valid when its order is paid and the code is not used yet; the booth picks the
+     * layout from printType and prints printCount sheets. Read-only: the code is used
+     * up by couponUse(), when the customer presses MULAI on the booth.
      */
     public function coupon(Request $r)
     {
@@ -92,8 +95,7 @@ class BoothController extends Controller
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
             ->where('order_items.code', $code)
             ->orderByDesc('order_items.id')
-            ->select('order_items.id', 'order_items.order_id', 'order_items.product_id',
-                     'order_items.printType', 'order_items.printCount', 'orders.status')
+            ->select('order_items.*', 'orders.status')
             ->first();
         if (!$item) {
             return response()->json($notFound, 404);
@@ -101,6 +103,10 @@ class BoothController extends Controller
         if (strtolower(trim((string) $item->status)) !== 'paid') {
             return response()->json(['valid' => false, 'reason' => 'not_paid',
                                      'message' => 'Pesanan belum lunas'], 409);
+        }
+        if (!empty($item->used_at)) {
+            return response()->json(['valid' => false, 'reason' => 'used',
+                                     'message' => 'Kode sudah dipakai'], 409);
         }
         return response()->json([
             'valid'       => true,
@@ -110,6 +116,53 @@ class BoothController extends Controller
             'print_type'  => $item->printType,
             'print_count' => (int) $item->printCount,
         ]);
+    }
+
+    /**
+     * The customer pressed MULAI: use the code up (order_items.used_at / used_machine,
+     * see server/booth-api/migration_003_coupon_used.sql). Atomic, so one code can
+     * start only one session even if two booths press at the same moment.
+     */
+    public function couponUse(Request $r)
+    {
+        if (!$this->authorized($r)) {
+            return response()->json(['error' => 'unauthorized'], 401);
+        }
+        $in = $r->json()->all();
+        $code = self::str($in, 'code', 255);
+        $itemId = self::int($in, 'item_id');
+        $q = DB::table('order_items')
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('order_items.code', $code);
+        if ($itemId > 0) {
+            $q->where('order_items.id', $itemId);
+        }
+        $item = $code === '' ? null
+            : $q->orderByDesc('order_items.id')->select('order_items.id', 'orders.status')->first();
+        if (!$item) {
+            return response()->json(['valid' => false, 'reason' => 'not_found',
+                                     'message' => 'Kode tidak ditemukan'], 404);
+        }
+        if (strtolower(trim((string) $item->status)) !== 'paid') {
+            return response()->json(['valid' => false, 'reason' => 'not_paid',
+                                     'message' => 'Pesanan belum lunas'], 409);
+        }
+        // No used_at column yet (added at launch): start anyway, nothing is marked.
+        if (!Schema::hasColumn('order_items', 'used_at')) {
+            return response()->json(['valid' => true, 'ok' => true, 'item_id' => (int) $item->id,
+                                     'marked' => false]);
+        }
+        $set = ['used_at' => Carbon::now('Asia/Jakarta')->format('Y-m-d H:i:s')];
+        if (Schema::hasColumn('order_items', 'used_machine')) {
+            $machine = trim(self::str($in, 'machine', 40) . ' ' . self::str($in, 'outlet', 19));
+            $set['used_machine'] = $machine !== '' ? $machine : null;
+        }
+        $n = DB::table('order_items')->where('id', $item->id)->whereNull('used_at')->update($set);
+        if ($n !== 1) {
+            return response()->json(['valid' => false, 'reason' => 'used',
+                                     'message' => 'Kode sudah dipakai'], 409);
+        }
+        return response()->json(['valid' => true, 'ok' => true, 'item_id' => (int) $item->id, 'marked' => true]);
     }
 
     /**
