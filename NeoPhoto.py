@@ -33,6 +33,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
     QStackedWidget, QFrame, QProgressBar, QGraphicsDropShadowEffect, QScroller, QCheckBox,
+    QScrollerProperties,
     QLineEdit
 )
 from PyQt5.QtCore import (
@@ -1221,6 +1222,23 @@ def _setup_fonts(app):
     FONT_DISPLAY = _pick("Fredoka", "Jua", "Gaegu", "Poppins", "Segoe UI Black", "Segoe UI")
     app.setFont(QFont(FONT_UI, 11))
     LOG.info(f"[FONT] ui={FONT_UI!r} display={FONT_DISPLAY!r}")
+
+
+def enable_touch_scroll(area):
+    """Drag-to-scroll with a finger (or the mouse) anywhere in a QScrollArea, not
+    only on its thin scrollbar. A short tap still clicks the button under it; once
+    the finger moves, it scrolls instead. No rubber-band bounce at the ends."""
+    vp = area.viewport()
+    QScroller.grabGesture(vp, QScroller.LeftMouseButtonGesture)
+    sc = QScroller.scroller(vp)
+    props = sc.scrollerProperties()
+    off = QScrollerProperties.OvershootAlwaysOff
+    props.setScrollMetric(QScrollerProperties.HorizontalOvershootPolicy, off)
+    props.setScrollMetric(QScrollerProperties.VerticalOvershootPolicy, off)
+    props.setScrollMetric(QScrollerProperties.DragStartDistance, 0.003)   # metres, ~3 mm
+    props.setScrollMetric(QScrollerProperties.MousePressEventDelay, 0.15)  # tap vs drag
+    props.setScrollMetric(QScrollerProperties.DecelerationFactor, 0.35)
+    sc.setScrollerProperties(props)
 
 
 class OnScreenKeyboard(QWidget):
@@ -3125,8 +3143,8 @@ class MainWindow(QMainWindow):
         self.layout_strip_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.layout_strip_scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
-            "QScrollBar:horizontal { height: 10px; background: #FFE1EC; border-radius: 5px; }"
-            "QScrollBar::handle:horizontal { background: #FF9CC0; border-radius: 5px; min-width: 50px; }"
+            "QScrollBar:horizontal { height: 16px; background: #FFE1EC; border-radius: 8px; }"
+            "QScrollBar::handle:horizontal { background: #FF9CC0; border-radius: 8px; min-width: 60px; }"
             "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
         )
         strip_host = QWidget()
@@ -3143,6 +3161,7 @@ class MainWindow(QMainWindow):
             self.layout_buttons.append((card, layout_def))
         self.layout_strip.addStretch()
         self.layout_strip_scroll.setWidget(strip_host)
+        enable_touch_scroll(self.layout_strip_scroll)
         self.btn_layout_back = QPushButton("← KEMBALI", screen)
         self.btn_layout_back.setFixedHeight(64)
         self.btn_layout_back.setMinimumWidth(180)
@@ -3643,7 +3662,7 @@ class MainWindow(QMainWindow):
         self.fp_slot_host = QWidget()
         self.fp_slot_host.setStyleSheet("background: transparent;")
         self.fp_slot_scroll.setWidget(self.fp_slot_host)
-        QScroller.grabGesture(self.fp_slot_scroll.viewport(), QScroller.LeftMouseButtonGesture)
+        enable_touch_scroll(self.fp_slot_scroll)
         self.fp_slot_widgets = []
         for i in range(MAX_SLOTS):
             slot = QPushButton(self.fp_slot_host)
@@ -3681,8 +3700,8 @@ class MainWindow(QMainWindow):
         self.frame_strip_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.frame_strip_scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
-            "QScrollBar:horizontal { height: 10px; background: #FFE1EC; border-radius: 5px; }"
-            "QScrollBar::handle:horizontal { background: #FF9CC0; border-radius: 5px; min-width: 50px; }"
+            "QScrollBar:horizontal { height: 16px; background: #FFE1EC; border-radius: 8px; }"
+            "QScrollBar::handle:horizontal { background: #FF9CC0; border-radius: 8px; min-width: 60px; }"
             "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
         )
         self.frame_strip_host = QWidget()
@@ -3692,6 +3711,7 @@ class MainWindow(QMainWindow):
         self.frame_strip.setSpacing(14)
         self.frame_strip.addStretch()
         self.frame_strip_scroll.setWidget(self.frame_strip_host)
+        enable_touch_scroll(self.frame_strip_scroll)
         self.btn_back_picker = QPushButton("← KEMBALI", screen)
         self.btn_back_picker.setFixedHeight(64)
         self.btn_back_picker.setMinimumWidth(180)
@@ -3727,8 +3747,8 @@ class MainWindow(QMainWindow):
         self.filter_panel_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.filter_panel_scroll.setStyleSheet(
             "QScrollArea { border: none; background: transparent; }"
-            "QScrollBar:vertical { width: 8px; background: #FFE1EC; border-radius: 4px; }"
-            "QScrollBar::handle:vertical { background: #FF9CC0; border-radius: 4px; min-height: 30px; }"
+            "QScrollBar:vertical { width: 14px; background: #FFE1EC; border-radius: 7px; }"
+            "QScrollBar::handle:vertical { background: #FF9CC0; border-radius: 7px; min-height: 40px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
         self.filter_panel_host = QWidget()
@@ -3752,6 +3772,7 @@ class MainWindow(QMainWindow):
             self.filter_cards[fid] = btn
         self.filter_panel_layout.addStretch(1)
         self.filter_panel_scroll.setWidget(self.filter_panel_host)
+        enable_touch_scroll(self.filter_panel_scroll)
         # ---- Extra print stepper (free, 0..printing.max_extra_prints) ----
         self.extra_card = QWidget(screen)
         self.extra_card.setObjectName("extraCard")
@@ -6095,7 +6116,7 @@ class MainWindow(QMainWindow):
         self.pick_host = QWidget()
         self.pick_host.setStyleSheet("background: transparent;")
         self.pick_scroll.setWidget(self.pick_host)
-        QScroller.grabGesture(self.pick_scroll.viewport(), QScroller.LeftMouseButtonGesture)
+        enable_touch_scroll(self.pick_scroll)
         self.pick_cards = []
         self._pick_order = []
         self._pick_pix = []
