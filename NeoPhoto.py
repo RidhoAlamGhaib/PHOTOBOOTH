@@ -856,6 +856,17 @@ SESSIONS_API_KEY = ""
 # /booth/session, /booth/promo from server/laravel). When set, SESSIONS_URL is
 # not used. SESSIONS_API_KEY must equal BOOTH_API_KEY in the site's .env.
 BOOTH_SITE_URL = ""
+
+
+def _site_url(url):
+    """"neophotoindonesia.my.id" -> "https://neophotoindonesia.my.id" (the hidden
+    browser, unlike a normal one, does not add the https:// itself)."""
+    url = (url or "").strip().rstrip("/")
+    if url and "://" not in url:
+        url = "https://" + url
+    return url
+
+
 _bridge_flush = None        # set by MainWindow when the hidden browser is used
 SESSIONS_QUEUE = BASE_DIR / "pending_sessions.json"   # waits here while offline
 _sessions_lock = threading.Lock()
@@ -2732,7 +2743,7 @@ class MainWindow(QMainWindow):
             try:
                 import web_bridge
                 self.web_bridge = web_bridge.WebBridge(
-                    BOOTH_SITE_URL.rstrip("/") + "/booth/bridge", SESSIONS_API_KEY,
+                    _site_url(BOOTH_SITE_URL) + "/booth/bridge", SESSIONS_API_KEY,
                     BASE_DIR / "webdata", self)
                 global _bridge_flush
                 _bridge_flush = self._flush_sessions_bridge
