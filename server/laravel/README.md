@@ -62,3 +62,8 @@ Check in a normal browser: `https://neophotoindonesia.my.id/booth/bridge` should
 
 One-time use needs the columns from `server/booth-api/migration_003_coupon_used.sql`
 (`order_items.used_at`, `used_machine`). Until they exist, codes work but are never marked.
+
+## BCA QRIS (SNAP)
+
+Endpoints BCA calls on the site (`/openapi/v1.0/access-token/b2b`, `/openapi/v1.0/qr/qr-mpm-notify`):
+see `README-BCA-QRIS.md`.
