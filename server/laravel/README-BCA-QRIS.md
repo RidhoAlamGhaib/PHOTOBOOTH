@@ -133,15 +133,32 @@ Setelah itu minta BCA kirim notifikasi tes dari sandbox / simulator mereka, lalu
 | `4095201` | `X-EXTERNAL-ID` dobel |
 | `5007300` / `5005200` | Error server / setting |
 
-## Belum dicek ke dokumen BCA
+## Sesuai dokumen BCA
 
-Endpoint ini dibuat mengikuti standar SNAP BI. Dokumen developer.bca.co.id belum bisa dibuka dari tempat
-kode ini dibuat, jadi cocokkan poin berikut dengan dokumen resmi BCA (OAuth & Signature v2.0, SNAP QRIS
-Notification v2.1) sebelum go-live:
+Dicek ke [developer.bca.co.id/id/Dokumentasi](https://developer.bca.co.id/id/Dokumentasi), bagian
+"OAuth2.0 (SNAP)", "Signature (SNAP)", "Headers (SNAP)" dan "QRIS MPM > SNAP QRIS Notification":
 
-- [ ] Format string-to-sign kedua signature (lihat "Cara kerja")
-- [ ] Kunci HMAC notifikasi: client secret yang mana (yang kamu berikan ke BCA atau dari BCA)
-- [ ] Letak `approvalCode` (root body atau `additionalInfo`) dan nama field lain di body notifikasi
-- [ ] Kode respons (`2007300`, `2005200`, dan kode error di tabel)
-- [ ] Format `X-TIMESTAMP` (contoh `2026-11-19T15:50:00+07:00`)
-- [ ] Daftar IP server BCA untuk whitelist
+- Signature token: `SHA256withRSA(client_ID + "|" + X-TIMESTAMP)`, base64. Gagal: `4017300 Unathorized. [Signature]`.
+- Signature notifikasi: `HMAC-SHA512(ClientSecret, METHOD:RelativeUrl:AccessToken:lowercase(hex(sha256(minify(body)))):Timestamp)`.
+- Token berlaku 900 detik, respons `2007300` dengan `tokenType: "bearer"`.
+- Notifikasi: service code `52`, sukses `2005200`, `X-EXTERNAL-ID` dobel `4095200`, header `CHANNEL-ID` `95251`,
+  `X-PARTNER-ID` = Kode Grup merchant. `approvalCode`, `issuerName`, `transactionDate` ada di `additionalInfo`.
+- **Notifikasi belum tersedia di sandbox BCA**: tes notifikasi hanya bisa di production / dengan bantuan tim BCA.
+
+## Kunci yang dipakai (jangan tertukar)
+
+| Arah | Siapa tanda tangan | Kunci di sisi kita |
+|---|---|---|
+| Mesin booth → BCA (generate / query QR) | mesin, private key di `NeoPhoto.py` (`BCA_PRIVATE_KEY_PEM`) | kirim **public key** pasangannya (format x.509 PEM) ke BCA |
+| BCA → website (token + notifikasi) | BCA, private key BCA | **public key BCA** di `BCA_SNAP_PUBLIC_KEY`, client id/secret di `.env` |
+
+Client ID / secret untuk arah BCA → website disepakati waktu onboarding dengan BCA; isi ke
+`BCA_SNAP_CLIENT_ID` / `BCA_SNAP_CLIENT_SECRET`.
+
+## Mesin booth
+
+`NeoPhoto.py` (bagian `BCA_*`) sudah mengikuti dokumen yang sama: `qrOption: "C"` supaya BCA mengirim
+isi QR (bawaannya cuma gambar), `additionalInfo.terminalId` di inquiry, `validityPeriod` minimal 6 menit,
+`CHANNEL-ID` `95251`, production `https://api.klikbca.com` (`BCA_IS_PRODUCTION = True`).
+Pakai dengan `config.json`: `"payment": {"mode": "qris", "qris_provider": "bca"}`.
+Mesin tetap cek status lewat inquiry ke BCA; tabel notifikasi jadi catatan cadangan di website.

@@ -548,18 +548,18 @@ class QrisClient:
 # booth PC before building the exe; empty = demo QR (like Midtrans without a key).
 #   BCA_PRIVATE_KEY_PEM: the RSA private key whose PUBLIC key was given to BCA
 #   (paste the whole "-----BEGIN ... PRIVATE KEY-----" block between the quotes).
-# Field names follow the SNAP BI standard; check them against BCA's own document
-# once it arrives (paths / service code may differ per bank).
+# Per developer.bca.co.id/id/Dokumentasi ("QRIS MPM": Generate QR, Inquiry).
 BCA_IS_PRODUCTION   = False
-BCA_BASE_URL        = ""        # empty = https://sandbox.bca.co.id (or the production URL BCA gives)
+BCA_BASE_URL        = ""        # empty = sandbox, or api.klikbca.com when BCA_IS_PRODUCTION
 BCA_CLIENT_ID       = ""        # X-CLIENT-KEY
 BCA_CLIENT_SECRET   = ""
-BCA_PARTNER_ID      = ""        # X-PARTNER-ID
-BCA_CHANNEL_ID      = ""        # CHANNEL-ID
+BCA_PARTNER_ID      = ""        # X-PARTNER-ID: Kode Grup (merchant reguler) / partner name
+BCA_CHANNEL_ID      = "95251"   # CHANNEL-ID (EDC WSID, per BCA's document)
 BCA_MERCHANT_ID     = ""
 BCA_TERMINAL_ID     = ""
 BCA_PRIVATE_KEY_PEM = """"""
 BCA_SANDBOX_URL     = "https://sandbox.bca.co.id"
+BCA_PRODUCTION_URL  = "https://api.klikbca.com"
 BCA_PATH_TOKEN      = "/openapi/v1.0/access-token/b2b"
 BCA_PATH_GENERATE   = "/openapi/v1.0/qr/qr-mpm-generate"
 BCA_PATH_QUERY      = "/openapi/v1.0/qr/qr-mpm-query"
@@ -575,12 +575,13 @@ class BcaQrisClient:
     Statuses are mapped onto Midtrans' names so the payment screen stays the same."""
     PAID = QrisClient.PAID
     FAILED = QrisClient.FAILED
-    STATUS = {"00": "settlement", "04": "refund", "05": "cancel", "06": "failure",
-              "07": "pending"}       # 01 initiated, 02 paying, 03 pending, 07 not found yet
+    STATUS = {"00": "settlement", "04": "refund", "05": "cancel", "06": "failure"}
+    # BCA latestTransactionStatus: 00 paid, 03 pending (unpaid), 04 refunded, 06 failed / QR expired
 
     def __init__(self):
         self.production = bool(BCA_IS_PRODUCTION)
-        self.base = (BCA_BASE_URL or BCA_SANDBOX_URL).rstrip("/")
+        self.base = (BCA_BASE_URL or (BCA_PRODUCTION_URL if self.production
+                                      else BCA_SANDBOX_URL)).rstrip("/")
         self.mock = not (BCA_CLIENT_ID and BCA_CLIENT_SECRET and BCA_PRIVATE_KEY_PEM.strip()
                          and BCA_MERCHANT_ID)
         self._token, self._token_until = None, 0.0
@@ -668,13 +669,14 @@ class BcaQrisClient:
             return {"qr_string": f"MOCK-QRIS-BCA|{order_id}|{amount}|BUKAN-PEMBAYARAN-ASLI",
                     "qr_url": None}
         until = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7))) \
-            + datetime.timedelta(minutes=int(PAYMENT_TIMEOUT_MINUTES))
+            + datetime.timedelta(minutes=max(6, int(PAYMENT_TIMEOUT_MINUTES) + 1))   # BCA: min 5 min
         out = self._call(BCA_PATH_GENERATE, {
             "partnerReferenceNo": order_id,
             "amount": {"value": f"{amount}.00", "currency": "IDR"},
             "merchantId": BCA_MERCHANT_ID,
             "terminalId": BCA_TERMINAL_ID,
             "validityPeriod": until.strftime("%Y-%m-%dT%H:%M:%S+07:00"),
+            "additionalInfo": {"qrOption": "C"},     # QR content (default is an image only)
         })
         if not out.get("qrContent"):
             raise QrisError("respon BCA tanpa QR")
@@ -687,7 +689,8 @@ class BcaQrisClient:
             with self._lock:
                 return "settlement" if order_id in self._mock_paid else "pending"
         body = {"originalPartnerReferenceNo": order_id, "serviceCode": BCA_SERVICE_CODE,
-                "merchantId": BCA_MERCHANT_ID}
+                "merchantId": BCA_MERCHANT_ID,
+                "additionalInfo": {"terminalId": BCA_TERMINAL_ID}}
         if self._refs.get(order_id):
             body["originalReferenceNo"] = self._refs[order_id]
         out = self._call(BCA_PATH_QUERY, body)

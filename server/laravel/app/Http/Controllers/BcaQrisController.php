@@ -10,7 +10,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * BCA SNAP QRIS (MPM): the two endpoints BCA calls on this website.
+ * BCA SNAP QRIS (MPM): the two endpoints BCA calls on this website
+ * (developer.bca.co.id/id/Dokumentasi: "OAuth2.0 (SNAP)", "Signature (SNAP)", "SNAP QRIS Notification").
  *
  *   POST /openapi/v1.0/access-token/b2b   BCA asks for a token (OAuth & Signature v2.0)
  *   POST /openapi/v1.0/qr/qr-mpm-notify   BCA reports a QRIS payment (SNAP QRIS Notification v2.1)
@@ -18,7 +19,7 @@ use Illuminate\Support\Str;
  * Token request:  X-SIGNATURE = SHA256withRSA(X-CLIENT-KEY + "|" + X-TIMESTAMP), signed
  *                 with BCA's private key, checked here with BCA's public key.
  * Notification:   X-SIGNATURE = HMAC-SHA512(client secret,
- *                   METHOD + ":" + path + ":" + token + ":" + sha256hex(minified body) + ":" + X-TIMESTAMP)
+ *                   METHOD + ":" + relative URL + ":" + token + ":" + sha256hex(minified body) + ":" + X-TIMESTAMP)
  * Settings: config/services.php "bca" (see server/laravel/README-BCA-QRIS.md).
  * Payments land in the bca_qris_notifications table (migration_004_bca_qris.sql).
  */
@@ -32,7 +33,7 @@ class BcaQrisController extends Controller
         return response()->json(array_merge([
             'responseCode' => $http . $service . $case,
             'responseMessage' => $message,
-        ], $extra), (int) $http);
+        ], $extra), (int) $http)->header('X-TIMESTAMP', Carbon::now('Asia/Jakarta')->format('Y-m-d\TH:i:sP'));
     }
 
     private static function cfg(string $key, $default = '')
@@ -111,7 +112,7 @@ class BcaQrisController extends Controller
         $clientId = (string) self::cfg('client_id');
         if ($clientId === '' || !hash_equals($clientId, $clientKey)) {
             Log::warning('[bca] token: unknown X-CLIENT-KEY ' . Str::limit($clientKey, 40));
-            return self::snap('401', self::TOKEN_SERVICE, '00', 'Unauthorized. Unknown client');
+            return self::snap('401', self::TOKEN_SERVICE, '00', 'Unauthorized. [Unknown client]');
         }
         $key = self::bcaPublicKey();
         if (!$key) {
@@ -121,14 +122,14 @@ class BcaQrisController extends Controller
         $ok = openssl_verify($clientKey . '|' . $ts, (string) base64_decode($sig, true), $key, OPENSSL_ALGO_SHA256);
         if ($ok !== 1) {
             Log::warning('[bca] token: bad X-SIGNATURE');
-            return self::snap('401', self::TOKEN_SERVICE, '00', 'Unauthorized. Signature');
+            return self::snap('401', self::TOKEN_SERVICE, '00', 'Unauthorized. [Signature]');
         }
         $ttl = (int) self::cfg('token_ttl', 900);
         $token = Str::random(64);
         Cache::put('bca:token:' . hash('sha256', $token), $clientKey, $ttl);
         return self::snap('200', self::TOKEN_SERVICE, '00', 'Successful', [
             'accessToken' => $token,
-            'tokenType' => 'Bearer',
+            'tokenType' => 'bearer',
             'expiresIn' => (string) $ttl,
         ]);
     }
@@ -140,7 +141,7 @@ class BcaQrisController extends Controller
         $auth = (string) $r->header('Authorization', '');
         $token = preg_match('/^Bearer\s+(\S+)$/i', $auth, $m) ? $m[1] : '';
         if ($token === '' || !Cache::has('bca:token:' . hash('sha256', $token))) {
-            return self::snap('401', $s, '01', 'Invalid Token (B2B)');
+            return self::snap('401', $s, '01', 'Invalid token (B2B)');
         }
         $ts = (string) $r->header('X-TIMESTAMP', '');
         $sig = (string) $r->header('X-SIGNATURE', '');
@@ -160,22 +161,23 @@ class BcaQrisController extends Controller
             Log::error('[bca] notify: services.bca.client_secret missing');
             return self::snap('500', $s, '00', 'General Error');
         }
-        $path = '/' . ltrim($r->getPathInfo(), '/');
+        // Relative URL as BCA sent it (path + query string, if any).
+        $path = '/' . ltrim((string) $r->getRequestUri(), '/');
         $stringToSign = strtoupper($r->getMethod()) . ':' . $path . ':' . $token . ':'
             . strtolower(hash('sha256', self::minifiedBody($r))) . ':' . $ts;
         $expected = base64_encode(hash_hmac('sha512', $stringToSign, $secret, true));
         if (!hash_equals($expected, $sig)) {
             Log::warning('[bca] notify: bad X-SIGNATURE');
-            return self::snap('401', $s, '00', 'Unauthorized. Signature');
+            return self::snap('401', $s, '00', 'Unauthorized. [Signature]');
         }
         $partnerId = (string) self::cfg('partner_id');
         if ($partnerId !== '' && !hash_equals($partnerId, (string) $r->header('X-PARTNER-ID'))) {
-            return self::snap('401', $s, '00', 'Unauthorized. Unknown partner');
+            return self::snap('401', $s, '00', 'Unauthorized. [Unknown partner]');
         }
         // X-EXTERNAL-ID is unique per day: a second request with the same one is a conflict.
         $extKey = 'bca:ext:' . Carbon::now('Asia/Jakarta')->format('Ymd') . ':' . $extId;
         if (!Cache::add($extKey, 1, 86400)) {
-            return self::snap('409', $s, '01', 'Conflict');
+            return self::snap('409', $s, '00', 'Conflict');
         }
 
         $in = $r->json()->all();
