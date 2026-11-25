@@ -1279,26 +1279,40 @@ CONFIG.update(_load_app_config())
 # ---- Seoul Pastel Pop palette ----
 # Legacy keys are kept so older call sites still resolve: "yellow" is now
 # the primary accent (pink) and "yellow_dk" its pressed shade.
+# Warm paper + charcoal ink, one accent (terracotta). Keys keep their old names
+# (pink = the accent, pink_soft = hairlines / tonal fills) so every screen follows.
+ACCENT = "#C85A32"
 COLORS = {
-    "bg_dark":   "#FFE4EC", "bg_mid": "#FFEFF4", "bg_light": "#FFF7F2",
-    "yellow":    "#FF6FA3", "yellow_dk": "#F0508A", "white": "#FFFFFF",
-    "ink":       "#3B2A4A", "muted": "#8C7A99", "danger": "#FF5A6E",
-    "success":   "#4CC9A8", "border": "#F3D6E2",
-    "pink":      "#FF6FA3", "pink_dk": "#F0508A", "pink_soft": "#FFD6E5",
-    "lilac":     "#B9A6FF", "lilac_dk": "#9C86F5", "lilac_soft": "#ECE6FF",
-    "mint":      "#8FE3CF", "mint_dk": "#4CC9A8", "mint_soft": "#DDF7EF",
-    "butter":    "#FFE59A", "cream": "#FFF7F2", "blush": "#FFE4EC",
-    "ink_soft":  "#7A6488", "card": "#FFFFFF",
+    "bg_dark":   "#F3EFEA", "bg_mid": "#F7F4F0", "bg_light": "#FAF8F5",
+    "yellow":    ACCENT, "yellow_dk": "#A8461F", "white": "#FDFCFA",
+    "ink":       "#1A1918", "muted": "#6F6A64", "danger": "#9E2B25",
+    "success":   "#2A5C43", "border": "#DDD6CC",
+    "pink":      ACCENT, "pink_dk": "#A8461F", "pink_soft": "#E4DDD3",
+    "lilac":     "#B8AA98", "lilac_dk": "#8E806D", "lilac_soft": "#EEE8DF",
+    "mint":      "#9DB3A2", "mint_dk": "#2A5C43", "mint_soft": "#E6ECE5",
+    "butter":    "#E9D9B6", "cream": "#FAF8F5", "blush": "#F3EFEA",
+    "ink_soft":  "#5E5953", "card": "#FDFCFA",
+}
+
+# Old hard-coded pastel colours in style sheets -> the paper palette.
+_HEX_MAP = {
+    "#FFC2D8": "#D9D1C5", "#FFE1EC": "#EEE8DF", "#FF9CC0": "#B8AA98", "#FFB3CD": "#C9BFB2",
+    "#7A6488": "#5E5953", "#3B2A4A": "#1A1918", "#FFF0F5": "#F3EFEA", "#FFFFFF": "#FDFCFA",
+    "#FFF7F2": "#FAF8F5", "#FFE4EC": "#F3EFEA", "#FFD6E5": "#E4DDD3", "#FF6FA3": ACCENT,
+    "#F0508A": "#A8461F", "#EFE3EA": "#E9E3DA", "#C4B2C0": "#B5ACA1", "#4CC9A8": "#2A5C43",
+    "#3BB394": "#234D38", "#241A2C": "#1A1918", "#F4ECF0": "#F1ECE5", "#D9C9D3": "#D3CBC0",
+    "#FF5A6E": "#9E2B25", "#F3D6E2": "#DDD6CC",
 }
 
 # Resolved by _setup_fonts() once QApplication exists. Drop .ttf/.otf files
 # into fonts/ (ships Fredoka for titles + Nunito for text, both OFL).
 FONT_UI = "Segoe UI"
 FONT_DISPLAY = "Segoe UI"
+FONT_MONO = "Consolas"
 
 
 def _setup_fonts(app):
-    global FONT_UI, FONT_DISPLAY
+    global FONT_UI, FONT_DISPLAY, FONT_MONO
     fdir = BASE_DIR / "fonts"
     if fdir.exists():
         for f in sorted(list(fdir.glob("*.ttf")) + list(fdir.glob("*.otf"))):
@@ -1311,10 +1325,51 @@ def _setup_fonts(app):
             if n in fams:
                 return n
         return "Segoe UI"
-    FONT_UI = _pick("Nunito", "Poppins", "Quicksand", "Segoe UI")
-    FONT_DISPLAY = _pick("Fredoka", "Jua", "Gaegu", "Poppins", "Segoe UI Black", "Segoe UI")
+    FONT_UI = _pick("Plus Jakarta Sans", "Segoe UI")
+    FONT_DISPLAY = _pick("Instrument Serif", "Georgia", "Segoe UI")
+    FONT_MONO = _pick("JetBrains Mono", "Consolas", "Courier New")
     app.setFont(QFont(FONT_UI, 11))
-    LOG.info(f"[FONT] ui={FONT_UI!r} display={FONT_DISPLAY!r}")
+    LOG.info(f"[FONT] ui={FONT_UI!r} display={FONT_DISPLAY!r} mono={FONT_MONO!r}")
+
+
+def _install_restyle():
+    """Every style sheet goes through here: paper palette, flat accent instead of
+    gradients, restrained corners (<= 6px), hairline borders, serif headings
+    (regular weight, tight tracking), mono for tracked uppercase tags, and a 1px
+    press for buttons."""
+    import re
+    grad = re.compile(r"qlineargradient\(\s*x1:[^,]*,\s*y1:[^,]*,\s*x2:[^,]*,\s*y2:[^,]*,\s*"
+                      r"stop:0\s+([^,]+?)\s*,\s*stop:1\s+[^)]+\)")
+    hexes = re.compile("|".join(re.escape(h) for h in _HEX_MAP), re.IGNORECASE)
+    radius = re.compile(r"border-radius:\s*(\d+)px")
+    border = re.compile(r"(border(?:-[a-z]+)?:\s*)(\d+)px(\s+(?:solid|dashed))")
+    tracked = re.compile(r"letter-spacing:\s*(\d+)px")
+    weight = re.compile(r"font-weight:\s*\d+")
+
+    def restyle(css):
+        if not css:
+            return css
+        css = grad.sub(lambda m: m.group(1), css)
+        css = hexes.sub(lambda m: _HEX_MAP[m.group(0).upper()], css)
+        css = radius.sub(lambda m: f"border-radius: {min(int(m.group(1)), 6)}px", css)
+        css = border.sub(lambda m: f"{m.group(1)}{1 if int(m.group(2)) <= 2 else 2}px{m.group(3)}", css)
+        if FONT_DISPLAY in css:                     # serif headings: one weight, tight
+            css = weight.sub("font-weight: 400", css)
+            if "letter-spacing" not in css:
+                css = css.replace(f"font-family: '{FONT_DISPLAY}';",
+                                  f"font-family: '{FONT_DISPLAY}'; letter-spacing: -1px;")
+        else:
+            t = tracked.search(css)
+            if t and int(t.group(1)) >= 3:           # tags: mono, modest tracking
+                css = tracked.sub("letter-spacing: 2px", css)
+                if "font-family" not in css:
+                    css = css.rstrip().rstrip(";") + f"; font-family: '{FONT_MONO}';"
+        if "QPushButton" in css and ":pressed" not in css:
+            css += "\nQPushButton:pressed { margin-top: 1px; }"
+        return css
+
+    orig = QWidget.setStyleSheet
+    QWidget.setStyleSheet = lambda self, css: orig(self, restyle(css))
 
 
 def enable_touch_scroll(area):
@@ -1529,40 +1584,15 @@ class PastelBackground(QWidget):
             sc = self._img.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             return sc.copy((sc.width() - w) // 2, (sc.height() - h) // 2, w, h)
         pm = QPixmap(w, h)
+        pm.fill(QColor(COLORS["cream"]))
+        # Faint paper grain: fixed noise, a few percent of ink, drawn once per size.
+        rnd = np.random.default_rng(7)
+        noise = np.zeros((h, w, 4), np.uint8)
+        noise[..., :3] = 26
+        noise[..., 3] = (rnd.random((h, w)) ** 6 * 26).astype(np.uint8)
+        grain = QImage(noise.data, w, h, w * 4, QImage.Format_RGBA8888)
         p = QPainter(pm)
-        p.setRenderHint(QPainter.Antialiasing)
-        g = QLinearGradient(0, 0, w * 0.35, h)
-        g.setColorAt(0.0, QColor(COLORS["cream"]))
-        g.setColorAt(1.0, QColor(COLORS["blush"]))
-        p.fillRect(0, 0, w, h, QBrush(g))
-        big = max(w, h)
-        p.setPen(Qt.NoPen)
-        for cx, cy, r, col, a in ((0.08, 0.12, 0.30, COLORS["lilac"], 70),
-                                  (0.92, 0.16, 0.26, COLORS["mint"], 60),
-                                  (0.86, 0.94, 0.34, COLORS["pink"], 55),
-                                  (0.10, 0.90, 0.24, COLORS["butter"], 85)):
-            rg = QRadialGradient(QPointF(cx * w, cy * h), r * big)
-            c0 = QColor(col); c0.setAlpha(a)
-            c1 = QColor(col); c1.setAlpha(0)
-            rg.setColorAt(0.0, c0)
-            rg.setColorAt(1.0, c1)
-            p.setBrush(QBrush(rg))
-            p.drawEllipse(QPointF(cx * w, cy * h), r * big, r * big)
-        dot = QColor(COLORS["pink"]); dot.setAlpha(30)
-        p.setBrush(dot)
-        step = 44
-        for row, y in enumerate(range(step // 2, h, step)):
-            off = step // 2 if row % 2 else 0
-            for x in range(off, w, step):
-                p.drawEllipse(QPointF(x, y), 2.2, 2.2)
-        for fx, fy, glyph, col, size in self._stickers:
-            c = QColor(col); c.setAlpha(130)
-            p.setPen(c)
-            f = QFont(FONT_DISPLAY)
-            f.setPixelSize(size)
-            f.setBold(True)
-            p.setFont(f)
-            p.drawText(QPointF(fx * w, fy * h), glyph)
+        p.drawImage(0, 0, grain)
         p.end()
         return pm
 
@@ -1587,30 +1617,26 @@ class PolaroidCluster(QWidget):
         p.setRenderHint(QPainter.TextAntialiasing)
         k = self.height() / 300.0
         cw, ch = 180 * k, 220 * k
-        specs = ((-12, 0.24, COLORS["lilac"], COLORS["lilac_soft"], "", "cheese!"),
-                 (9, 0.76, COLORS["mint"], COLORS["mint_soft"], "", "bestie"),
-                 (-2, 0.50, COLORS["pink"], COLORS["pink_soft"], "", "seoul"))
-        for angle, fx, col, soft, glyph, cap in specs:
+        specs = ((-5, 0.26, COLORS["lilac"], "NO. 01"),
+                 (4, 0.74, COLORS["mint"], "NO. 03"),
+                 (-1, 0.50, COLORS["pink"], "NO. 02"))
+        hair = QColor(COLORS["ink"]); hair.setAlpha(60)
+        for angle, fx, tone, cap in specs:
             p.save()
             p.translate(self.width() * fx, self.height() * 0.5)
             p.rotate(angle)
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(190, 70, 120, 45))
-            p.drawRoundedRect(QRectF(-cw / 2 + 4, -ch / 2 + 10, cw, ch), 10, 10)
-            p.setBrush(QColor("white"))
-            p.drawRoundedRect(QRectF(-cw / 2, -ch / 2, cw, ch), 10, 10)
+            pen = p.pen(); pen.setColor(hair); pen.setWidthF(1.0); p.setPen(pen)
+            p.setBrush(QColor(COLORS["card"]))
+            p.drawRoundedRect(QRectF(-cw / 2, -ch / 2, cw, ch), 3, 3)
             inner = QRectF(-cw / 2 + 12 * k, -ch / 2 + 12 * k, cw - 24 * k, ch - 62 * k)
-            g = QLinearGradient(inner.topLeft(), inner.bottomRight())
-            g.setColorAt(0.0, QColor(soft))
-            g.setColorAt(1.0, QColor(col))
-            p.setBrush(QBrush(g))
-            p.drawRoundedRect(inner, 6, 6)
-            f = QFont(FONT_DISPLAY); f.setPixelSize(int(58 * k)); p.setFont(f)
-            p.setPen(QColor("white"))
-            p.drawText(inner, Qt.AlignCenter, glyph)
-            f2 = QFont(FONT_DISPLAY); f2.setPixelSize(int(20 * k)); p.setFont(f2)
-            p.setPen(QColor(COLORS["ink"]))
-            p.drawText(QRectF(-cw / 2, ch / 2 - 50 * k, cw, 44 * k), Qt.AlignCenter, cap)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(tone))
+            p.drawRect(inner)
+            f2 = QFont(FONT_MONO); f2.setPixelSize(int(13 * k)); f2.setLetterSpacing(QFont.AbsoluteSpacing, 2)
+            p.setFont(f2)
+            p.setPen(QColor(COLORS["ink_soft"]))
+            p.drawText(QRectF(-cw / 2 + 12 * k, ch / 2 - 46 * k, cw - 24 * k, 40 * k),
+                       Qt.AlignLeft | Qt.AlignVCenter, cap)
             p.restore()
 
 TWEMOJI = {
@@ -3237,94 +3263,117 @@ class MainWindow(QMainWindow):
         screen = QWidget()
         screen.setStyleSheet("background: transparent;")
         root = QVBoxLayout(screen)
-        root.setContentsMargins(80, 40, 80, 40)
+        root.setContentsMargins(72, 36, 72, 32)
         root.setSpacing(0)
+        ink, soft, acc = COLORS["ink"], COLORS["ink_soft"], COLORS["pink"]
+        mono = f"font-family: '{FONT_MONO}'; font-size: 15px; letter-spacing: 2px; background: transparent;"
+
+        def hairline():
+            line = QFrame()
+            line.setFixedHeight(1)
+            line.setStyleSheet(f"background: {COLORS['border']}; border: none;")
+            return line
+
+        # Masthead: studio tag left, machine metadata + admin right.
         top = QHBoxLayout()
+        top.setSpacing(24)
+        eyebrow = QLabel("")
+        eyebrow.setStyleSheet(f"color: {ink}; {mono} font-weight: 700;")
+        self.home_eyebrow = eyebrow
+        top.addWidget(eyebrow)
         top.addStretch(1)
-        btn_admin = QPushButton("\u2699")
-        btn_admin.setFixedSize(64, 64)
+        self.home_meta = QLabel("")
+        self.home_meta.setStyleSheet(f"color: {soft}; {mono}")
+        top.addWidget(self.home_meta)
+        btn_admin = QPushButton("ADMIN")
+        btn_admin.setFixedHeight(40)
         btn_admin.setCursor(Qt.PointingHandCursor)
         btn_admin.setFocusPolicy(Qt.NoFocus)
         btn_admin.setStyleSheet(f"""
-            QPushButton {{ background: rgba(255,255,255,0.75); color: {COLORS['ink_soft']};
-                           border: 2px solid {COLORS['pink_soft']}; border-radius: 32px;
-                           font-size: 30px; }}""")
+            QPushButton {{ background: transparent; color: {soft}; border: 1px solid {COLORS['border']};
+                           border-radius: 4px; padding: 0 14px; font-family: '{FONT_MONO}';
+                           font-size: 13px; letter-spacing: 2px; }}""")
         btn_admin.clicked.connect(self._ask_exit)
         top.addWidget(btn_admin)
         root.addLayout(top)
+        root.addSpacing(18)
+        root.addWidget(hairline())
         root.addStretch(1)
-        eyebrow = QLabel(f"{CONFIG['ui']['studio_name']}")
-        self.home_eyebrow = eyebrow
-        eyebrow.setStyleSheet(f"""
-            color: {COLORS['pink_dk']}; background: white;
-            border: 2px solid {COLORS['pink_soft']}; border-radius: 22px;
-            font-size: 16px; font-weight: 800; letter-spacing: 6px;
-            padding: 10px 28px;
-        """)
-        root.addWidget(eyebrow, 0, Qt.AlignHCenter)
-        root.addSpacing(26)
-        root.addWidget(PolaroidCluster(), 0, Qt.AlignHCenter)
-        root.addSpacing(14)
-        title = QLabel(CONFIG["ui"]["app_title"])
+
+        # Body: editorial left column, prints on the right.
+        body = QHBoxLayout()
+        body.setSpacing(48)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        kicker = QLabel("NO. 01 \u2014 PHOTOBOOTH")
+        kicker.setStyleSheet(f"color: {acc}; {mono}")
+        col.addWidget(kicker)
+        col.addSpacing(18)
+        title = QLabel("")
+        title.setWordWrap(True)
+        title.setStyleSheet(f"color: {ink}; font-size: 132px; font-family: '{FONT_DISPLAY}'; "
+                            f"background: transparent;")
         self.home_title = title
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet(f"""
-            color: {COLORS['ink']}; font-size: 104px; font-weight: 800;
-            font-family: '{FONT_DISPLAY}'; background: transparent;
-        """)
-        root.addWidget(title)
-        root.addSpacing(6)
-        tagline = QLabel(CONFIG["ui"]["tagline"])
+        col.addWidget(title)
+        col.addSpacing(14)
+        tagline = QLabel("")
+        tagline.setWordWrap(True)
+        tagline.setMaximumWidth(760)
+        tagline.setStyleSheet(f"color: {soft}; font-size: 26px; background: transparent;")
         self.home_tagline = tagline
-        tagline.setAlignment(Qt.AlignCenter)
-        tagline.setStyleSheet(f"""
-            color: {COLORS['ink_soft']}; font-size: 26px;
-            font-weight: 500; background: transparent;
-        """)
-        root.addWidget(tagline)
-        root.addSpacing(40)
-        self.btn_start = QPushButton(f"{CONFIG['ui']['start_button']}")
-        self.btn_start.setFixedHeight(104)
+        col.addWidget(tagline)
+        col.addSpacing(44)
+        self.btn_start = QPushButton("")
+        self.btn_start.setFixedHeight(96)
         self.btn_start.setMinimumWidth(440)
         self.btn_start.setCursor(Qt.PointingHandCursor)
         self.btn_start.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {COLORS['pink']}, stop:1 {COLORS['lilac']});
-                color: white; border: 4px solid white;
-                font-size: 32px; font-weight: 800;
-                border-radius: 52px; padding: 0 56px;
-            }}
-            QPushButton:hover {{ background: {COLORS['pink_dk']}; }}
-        """)
+            QPushButton {{ background: {acc}; color: {COLORS['cream']}; border: 1px solid {COLORS['pink_dk']};
+                           border-radius: 6px; font-size: 30px; font-weight: 700; padding: 0 48px;
+                           text-align: left; }}
+            QPushButton:pressed {{ background: {COLORS['pink_dk']}; margin-top: 1px; }}
+            QPushButton:disabled {{ background: {COLORS['border']}; color: {soft}; border-color: {COLORS['border']}; }}""")
         self.btn_start.clicked.connect(self._goto_layout_picker)
-        self._add_shadow(self.btn_start, blur=40, y_offset=14, alpha=160)
-        root.addWidget(self.btn_start, 0, Qt.AlignHCenter)
-        root.addSpacing(20)
+        col.addWidget(self.btn_start, 0, Qt.AlignLeft)
+        col.addSpacing(16)
         hint = QLabel("")
+        hint.setStyleSheet(f"color: {soft}; {mono} font-size: 13px;")
         self.home_hint = hint
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; "
-                           f"font-weight: 600; background: transparent;")
-        root.addWidget(hint)
+        col.addWidget(hint)
+        body.addLayout(col, 3)
+        body.addWidget(PolaroidCluster(), 2, Qt.AlignVCenter | Qt.AlignRight)
+        root.addLayout(body)
         root.addStretch(1)
-        self._refresh_home_texts()
-        # Paper counter: small pill pinned to the top-left of the home screen.
-        self.media_label = QLabel("", screen)
-        self.media_label.move(24, 24)
+
+        # Footer: the three steps, and the paper counter.
+        root.addWidget(hairline())
+        root.addSpacing(14)
+        foot = QHBoxLayout()
+        foot.setSpacing(56)
+        for num, text in (("01", "Pilih"), ("02", "Foto"), ("03", "Cetak")):
+            lab = QLabel(f"{num}  {text.upper()}")
+            lab.setStyleSheet(f"color: {soft}; {mono}")
+            foot.addWidget(lab)
+        foot.addStretch(1)
+        self.media_label = QLabel("")
         self.media_label.hide()
+        foot.addWidget(self.media_label)
+        root.addLayout(foot)
+        self._refresh_home_texts()
         self.stack.addWidget(screen)
 
     def _refresh_home_texts(self):
         ui = CONFIG.get("ui", {}) or {}
-        self.home_eyebrow.setText(str(ui.get("studio_name", "")))
+        self.home_eyebrow.setText(str(ui.get("studio_name", "")).upper())
+        meta = [str(CONFIG.get(k, "") or "").strip() for k in ("booth_name", "outlet")]
+        self.home_meta.setText("  \u00b7  ".join(m.upper() for m in meta if m))
         self.home_title.setText(str(ui.get("app_title", "")))
         self.home_tagline.setText(str(ui.get("tagline", "")))
         self.btn_start.setText(str(ui.get("start_button", "")))
         extra = max(0, int(CONFIG.get("extra_shots", 0) or 0))
-        hint_txt = "tap tombol di atas untuk mulai"
+        hint_txt = "TAP UNTUK MULAI"
         if extra > 0:
-            hint_txt += f"   \u00b7   +{extra} foto bonus, pilih favoritmu"
+            hint_txt += f"   \u00b7   +{extra} FOTO BONUS"
         self.home_hint.setText(hint_txt)
 
     @staticmethod
@@ -3333,11 +3382,8 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _add_shadow(widget, blur=24, x_offset=0, y_offset=6, alpha=120):
-        eff = QGraphicsDropShadowEffect()
-        eff.setBlurRadius(blur)
-        eff.setOffset(x_offset, y_offset)
-        eff.setColor(QColor(190, 70, 120, max(20, int(alpha * 0.45))))
-        widget.setGraphicsEffect(eff)
+        """No drop shadows: the paper look takes hierarchy from hairlines."""
+        return
 
     def _resolve_default_layout(self):
         layouts = list(CONFIG.get("layouts", []))
@@ -3776,7 +3822,8 @@ class MainWindow(QMainWindow):
         self.countdown_label = QLabel(self.preview_container)
         self.countdown_label.setAlignment(Qt.AlignCenter)
         self.countdown_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.countdown_label.setStyleSheet("color: white; background: transparent; font-weight: 900;")
+        self.countdown_label.setStyleSheet(f"color: white; background: transparent; font-weight: 700; "
+                                           f"font-family: '{FONT_MONO}';")
         self.countdown_label.hide()
         self._add_shadow(self.countdown_label, blur=40, y_offset=4, alpha=180)
         self.ready_banner = QLabel("Siap-siap ya!", self.preview_container)
@@ -4061,8 +4108,8 @@ class MainWindow(QMainWindow):
             """)
         self.extra_value = QLabel("0")
         self.extra_value.setAlignment(Qt.AlignCenter)
-        self.extra_value.setStyleSheet(f"color: {COLORS['ink']}; font-size: 40px; font-weight: 800; "
-                                       f"font-family: '{FONT_DISPLAY}'; background: transparent; border: none;")
+        self.extra_value.setStyleSheet(f"color: {COLORS['ink']}; font-size: 40px; font-weight: 700; "
+                                       f"font-family: '{FONT_MONO}'; background: transparent; border: none;")
         ec_row.addWidget(self.btn_extra_minus)
         ec_row.addWidget(self.extra_value, 1)
         ec_row.addWidget(self.btn_extra_plus)
@@ -4208,7 +4255,8 @@ class MainWindow(QMainWindow):
         root.addSpacing(12)
         self.print_pct = QLabel("0%")
         self.print_pct.setAlignment(Qt.AlignCenter)
-        self.print_pct.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; font-weight: 700; letter-spacing: 2px; background: transparent;")
+        self.print_pct.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; font-weight: 700; letter-spacing: 2px; "
+                                     f"font-family: '{FONT_MONO}'; background: transparent;")
         root.addWidget(self.print_pct)
         root.addStretch(1)
         self.print_timer = QTimer(self)
@@ -4535,8 +4583,8 @@ class MainWindow(QMainWindow):
         root.addSpacing(4)
         self.pay_amount = QLabel("")
         self.pay_amount.setAlignment(Qt.AlignCenter)
-        self.pay_amount.setStyleSheet(f"color: {COLORS['ink']}; font-size: 44px; font-weight: 900; "
-                                      f"font-family: '{FONT_DISPLAY}'; background: transparent;")
+        self.pay_amount.setStyleSheet(f"color: {COLORS['ink']}; font-size: 44px; font-weight: 700; "
+                                      f"font-family: '{FONT_MONO}'; background: transparent;")
         root.addWidget(self.pay_amount)
         root.addSpacing(18)
         self.pay_qr = QLabel("")
@@ -4558,7 +4606,7 @@ class MainWindow(QMainWindow):
         self.pay_timer_lbl = QLabel("")
         self.pay_timer_lbl.setAlignment(Qt.AlignCenter)
         self.pay_timer_lbl.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 22px; "
-                                         f"font-weight: 900; background: transparent;")
+                                         f"font-weight: 700; font-family: '{FONT_MONO}'; background: transparent;")
         root.addWidget(self.pay_timer_lbl)
         root.addSpacing(18)
         row = QHBoxLayout()
@@ -4630,7 +4678,7 @@ class MainWindow(QMainWindow):
                 from PIL import ImageDraw
                 d = ImageDraw.Draw(img)
                 band = size // 7
-                d.rectangle([0, (size - band) // 2, size, (size + band) // 2], fill=(240, 80, 138))
+                d.rectangle([0, (size - band) // 2, size, (size + band) // 2], fill=(200, 90, 50))
                 try:
                     from PIL import ImageFont
                     f = ImageFont.load_default(size=int(band * 0.6))
@@ -5047,8 +5095,8 @@ class MainWindow(QMainWindow):
         root.addSpacing(24)
         self.cs_timer_lbl = QLabel("")
         self.cs_timer_lbl.setAlignment(Qt.AlignCenter)
-        self.cs_timer_lbl.setStyleSheet(f"color: {COLORS['ink']}; font-size: 26px; font-weight: 800; "
-                                        f"background: transparent;")
+        self.cs_timer_lbl.setStyleSheet(f"color: {COLORS['ink']}; font-size: 26px; font-weight: 700; "
+                                        f"font-family: '{FONT_MONO}'; background: transparent;")
         root.addWidget(self.cs_timer_lbl)
         root.addSpacing(30)
         btn_cancel = QPushButton("Batal")
@@ -5562,7 +5610,8 @@ class MainWindow(QMainWindow):
         cd_h = int(min(pc_w, pc_h) * 0.45)
         cd_w = max(cd_h, int(pc_w * 0.55))
         cd_font = max(60, int(cd_h * 0.78))
-        self.countdown_label.setStyleSheet(f"color: white; background: transparent; font-weight: 900; font-size: {cd_font}px;")
+        self.countdown_label.setStyleSheet(f"color: white; background: transparent; font-weight: 700; "
+                                           f"font-family: '{FONT_MONO}'; font-size: {cd_font}px;")
         self.countdown_label.setFixedSize(cd_w, cd_h)
         self.countdown_label.setGeometry((pc_w - cd_w) // 2, (pc_h - cd_h) // 2, cd_w, cd_h)
         rb_w = int(pc_w * 0.55)
@@ -6476,7 +6525,7 @@ class MainWindow(QMainWindow):
             old.deleteLater()
         dim = QWidget(parent)
         dim.setAttribute(Qt.WA_StyledBackground, True)
-        dim.setStyleSheet("background: rgba(40, 20, 50, 150);")
+        dim.setStyleSheet("background: rgba(26, 25, 24, 150);")
         dim.setGeometry(0, 0, parent.width(), parent.height())
         box = QWidget(dim)
         box.setAttribute(Qt.WA_StyledBackground, True)
@@ -6586,8 +6635,8 @@ class MainWindow(QMainWindow):
             cap = QLabel(labels[i] if i < len(labels) else f"#{i + 1}", card)
             cap.setAlignment(Qt.AlignCenter)
             cap.setAttribute(Qt.WA_TransparentForMouseEvents)
-            cap.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; font-weight: 800; "
-                              f"font-family: '{FONT_DISPLAY}'; background: transparent; border: none;")
+            cap.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 16px; font-weight: 400; "
+                              f"font-family: '{FONT_MONO}'; background: transparent; border: none;")
             badge = QLabel("", card)
             badge.setAlignment(Qt.AlignCenter)
             badge.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -7683,7 +7732,7 @@ class MainWindow(QMainWindow):
         host = self.centralWidget()
         dim = QWidget(host)
         dim.setAttribute(Qt.WA_StyledBackground, True)
-        dim.setStyleSheet("background: rgba(40, 20, 50, 170);")
+        dim.setStyleSheet("background: rgba(26, 25, 24, 170);")
         dim.setGeometry(0, 0, host.width(), host.height())
         box = QWidget(dim)
         box.setAttribute(Qt.WA_StyledBackground, True)
@@ -8006,7 +8055,7 @@ class MainWindow(QMainWindow):
         host = self.centralWidget()
         dim = QWidget(host)
         dim.setAttribute(Qt.WA_StyledBackground, True)
-        dim.setStyleSheet("background: rgba(40, 20, 50, 170);")
+        dim.setStyleSheet("background: rgba(26, 25, 24, 170);")
         dim.setGeometry(0, 0, host.width(), host.height())
         box = QWidget(dim)
         box.setAttribute(Qt.WA_StyledBackground, True)
@@ -8235,6 +8284,7 @@ if __name__ == "__main__":
         LOG.warning(f"[WEB] PyQtWebEngine not available: {e}")
     app = QApplication(sys.argv)
     _setup_fonts(app)
+    _install_restyle()
     _apply_ui_scaling(app)
     win = MainWindow()
     _install_exit_camera_cleanup(app, win)
