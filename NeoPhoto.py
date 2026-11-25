@@ -292,6 +292,12 @@ _FALLBACK_DEFAULTS = {
     "access_code": {
         "mode": "free",
     },
+    # full_frame: photos are taken at the camera's full frame (like the timelapse)
+    # instead of cut to the frame hole while shooting; the guest moves / zooms each
+    # photo inside its hole on the frame screen. false = old behaviour (cut at capture).
+    "capture": {
+        "full_frame": True,
+    },
     # How customers get a session:
     #   "qris"   = choose a layout, pay with QRIS (bonus photos / extra prints are paid too)
     #   "coupon" = type the code bought on the website (order_items.code); the order's
@@ -1406,6 +1412,78 @@ class OnScreenKeyboard(QWidget):
             self._toggle_shift()
 
 
+class AdjustView(QLabel):
+    """Frame screen: one photo shown through its frame hole. Drag to move it,
+    zoom with the buttons (or the mouse wheel)."""
+    changed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.OpenHandCursor)
+        self._src = None
+        self._aspect = 3 / 4
+        self.adj = (1.0, 0.5, 0.5)
+        self._last = None
+
+    def set_photo(self, img_bgr, aspect, adj):
+        h, w = img_bgr.shape[:2]
+        sc = min(1.0, 1600.0 / max(w, h))          # small copy: dragging stays smooth
+        self._src = cv2.resize(img_bgr, (int(w * sc), int(h * sc)),
+                               interpolation=cv2.INTER_AREA) if sc < 1 else img_bgr
+        self._aspect = aspect
+        self.adj = clamp_adjust(self._src.shape, 1000 * aspect, 1000, adj)
+        self.render()
+
+    def zoom_by(self, factor):
+        z, cx, cy = self.adj
+        self.adj = clamp_adjust(self._src.shape, 1000 * self._aspect, 1000, (z * factor, cx, cy))
+        self.render()
+        self.changed.emit()
+
+    def render(self):
+        if self._src is None or self.width() < 10:
+            return
+        w, h = self.width(), self.height()
+        piece = crop_adjusted(self._src, w, h, self.adj)
+        rgb = np.ascontiguousarray(cv2.cvtColor(piece, cv2.COLOR_BGR2RGB))
+        qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
+        self.setPixmap(QPixmap.fromImage(qimg.copy()))
+
+    def mousePressEvent(self, e):
+        self._last = e.pos()
+        self.setCursor(Qt.ClosedHandCursor)
+
+    def mouseMoveEvent(self, e):
+        if self._last is None or self._src is None:
+            return
+        d = e.pos() - self._last
+        self._last = e.pos()
+        z, cx, cy = self.adj
+        sh, sw = self._src.shape[:2]
+        if sw / float(sh) > self._aspect:
+            cw, ch = sh * self._aspect, float(sh)
+        else:
+            cw, ch = float(sw), sw / self._aspect
+        # Moving a finger right shows more of the photo's left side.
+        cx -= d.x() * (cw / z) / max(1, self.width()) / sw
+        cy -= d.y() * (ch / z) / max(1, self.height()) / sh
+        self.adj = clamp_adjust(self._src.shape, 1000 * self._aspect, 1000, (z, cx, cy))
+        self.render()
+
+    def mouseReleaseEvent(self, e):
+        self._last = None
+        self.setCursor(Qt.OpenHandCursor)
+        self.changed.emit()
+
+    def wheelEvent(self, e):
+        self.zoom_by(1.1 if e.angleDelta().y() > 0 else 1 / 1.1)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.render()
+
+
 class PastelBackground(QWidget):
     """App backdrop: cream->blush gradient, soft colour blobs, faint polka
     dots and scattered stickers. Rendered once per size into a pixmap so the
@@ -1840,6 +1918,50 @@ def crop_center_to_aspect(img_bgr, target_w, target_h, fit_mode="cover", pad_col
         y0 = (h - new_h) // 2
         cropped = img_bgr[y0:y0 + new_h, :]
     return cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+
+def _full_frame():
+    return bool((CONFIG.get("capture", {}) or {}).get("full_frame", True))
+
+
+ADJUST_ZOOM_MAX = 4.0
+
+
+def crop_adjusted(img_bgr, target_w, target_h, adj):
+    """Cut a target_w x target_h piece out of a photo the way the guest placed it:
+    adj = (zoom, cx, cy), zoom 1 = largest piece that fits (like a centre crop),
+    cx / cy = centre of the piece as a fraction of the photo's width / height."""
+    h, w = img_bgr.shape[:2]
+    if w <= 0 or h <= 0 or target_w <= 0 or target_h <= 0:
+        return img_bgr
+    zoom, cx, cy = adj
+    zoom = min(ADJUST_ZOOM_MAX, max(1.0, float(zoom)))
+    ar = target_w / float(target_h)
+    if w / float(h) > ar:
+        cw, ch = h * ar, float(h)
+    else:
+        cw, ch = float(w), w / ar
+    cw, ch = cw / zoom, ch / zoom
+    x0 = min(max(cx * w - cw / 2.0, 0.0), w - cw)
+    y0 = min(max(cy * h - ch / 2.0, 0.0), h - ch)
+    x0, y0 = int(round(x0)), int(round(y0))
+    piece = img_bgr[y0:y0 + max(1, int(round(ch))), x0:x0 + max(1, int(round(cw)))]
+    interp = cv2.INTER_AREA if piece.shape[1] > target_w else cv2.INTER_LINEAR
+    return cv2.resize(piece, (int(target_w), int(target_h)), interpolation=interp)
+
+
+def clamp_adjust(img_shape, target_w, target_h, adj):
+    """Keep the piece inside the photo (so the centre stops at the edges)."""
+    h, w = img_shape[:2]
+    zoom, cx, cy = adj
+    zoom = min(ADJUST_ZOOM_MAX, max(1.0, float(zoom)))
+    ar = target_w / float(max(1, target_h))
+    if w / float(h) > ar:
+        cw, ch = h * ar, float(h)
+    else:
+        cw, ch = float(w), w / ar
+    hw, hh = cw / zoom / 2.0 / w, ch / zoom / 2.0 / h
+    return (zoom, min(max(cx, hw), 1.0 - hw), min(max(cy, hh), 1.0 - hh))
 
 
 def _true_color():
@@ -4685,6 +4807,9 @@ class MainWindow(QMainWindow):
                         QTimer.singleShot(0, self._ask_exit)
                 else:
                     self._corner_taps = []
+        if (event.type() == QEvent.MouseButtonRelease and obj is getattr(self, "fp_preview", None)
+                and _full_frame()):
+            self._fp_preview_tapped(event.pos())
         if (event.type() == QEvent.FocusIn and isinstance(obj, QLineEdit)
                 and obj in getattr(self, "_st_line_edits", ())):
             self.st_keyboard.target = obj
@@ -5411,6 +5536,9 @@ class MainWindow(QMainWindow):
             preview_aspect = self.pose_aspects[pose_idx]
         else:
             preview_aspect = 3 / 4
+        raw = getattr(self, "_last_uncropped_frame", None)
+        if _full_frame() and raw is not None:
+            preview_aspect = raw.shape[1] / float(max(1, raw.shape[0]))   # whole camera frame
         N = max(1, min(MAX_SLOTS, self.total_shots))
         thumb_strip_h = 130 if N > 0 else 0
         bottom_pad = 30
@@ -5526,7 +5654,39 @@ class MainWindow(QMainWindow):
         rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimg).scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        if _full_frame() and not is_cropped:
+            self._draw_frame_guide(pixmap)
         self.preview_label.setPixmap(pixmap)
+
+    def _draw_frame_guide(self, pixmap):
+        """Full-frame shooting: mark the part that fills the frame hole when the
+        photo is not moved (outside dimmed, thin corners on the edge)."""
+        pose_idx = (self.current_step - 1) % max(1, self.shots_per_session)
+        aspect = self.pose_aspects[pose_idx] if pose_idx < len(self.pose_aspects) else 3 / 4
+        pw, ph = pixmap.width(), pixmap.height()
+        if pw / float(ph) > aspect:
+            gw, gh = ph * aspect, float(ph)
+        else:
+            gw, gh = float(pw), pw / aspect
+        gx, gy = (pw - gw) / 2.0, (ph - gh) / 2.0
+        if gw >= pw - 2 and gh >= ph - 2:
+            return
+        p = QPainter(pixmap)
+        dim = QColor(0, 0, 0, 90)
+        p.fillRect(QRectF(0, 0, pw, gy), dim)
+        p.fillRect(QRectF(0, gy + gh, pw, ph - gy - gh), dim)
+        p.fillRect(QRectF(0, gy, gx, gh), dim)
+        p.fillRect(QRectF(gx + gw, gy, pw - gx - gw, gh), dim)
+        pen = p.pen()
+        pen.setColor(QColor(255, 255, 255, 220))
+        pen.setWidthF(2.0)
+        p.setPen(pen)
+        L = min(gw, gh) * 0.08
+        for x, y, dx, dy in ((gx, gy, 1, 1), (gx + gw, gy, -1, 1),
+                             (gx, gy + gh, 1, -1), (gx + gw, gy + gh, -1, -1)):
+            p.drawLine(QPointF(x, y), QPointF(x + dx * L, y))
+            p.drawLine(QPointF(x, y), QPointF(x, y + dy * L))
+        p.end()
 
     def _load_frames(self):
         paths = sorted(FRAME_DIR.glob("*.png"))
@@ -5677,11 +5837,14 @@ class MainWindow(QMainWindow):
 
     def _fp_thumb(self, shot_key, frame, w, h):
         flt = getattr(self, "current_filter", "none")
-        key = (shot_key, flt, w, h)
+        adj = (getattr(self, "_adjust", None) or {}).get(shot_key)
+        key = (shot_key, flt, w, h, adj)
         pix = self._fp_thumb_cache.get(key)
         if pix is not None:
             return pix
         # Downscale before beautify/filter: thumbnails don't need full res.
+        if adj is not None:
+            frame = crop_adjusted(frame, 2 * w, 2 * h, adj)
         fh, fw = frame.shape[:2]
         sc = min(1.0, 2.0 * max(w / max(1, fw), h / max(1, fh)))
         src = frame
@@ -5725,6 +5888,22 @@ class MainWindow(QMainWindow):
                 img_lbl.show()
                 slot.image_label = img_lbl
         self._style_fp_slots()
+
+    def _fp_preview_tapped(self, pos):
+        pix = self.fp_preview.pixmap()
+        wh = getattr(self, "_fp_canvas_wh", None)
+        if pix is None or pix.isNull() or not wh:
+            return
+        # The pixmap is centred in the label.
+        ox = (self.fp_preview.width() - pix.width()) / 2.0
+        oy = (self.fp_preview.height() - pix.height()) / 2.0
+        cx = (pos.x() - ox) * wh[0] / float(pix.width())
+        cy = (pos.y() - oy) * wh[1] / float(pix.height())
+        for rect, pose_idx in getattr(self, "_fp_hits", []):
+            x, y, w, h = rect
+            if x <= cx <= x + w and y <= cy <= y + h:
+                self._open_adjust(pose_idx, rect)
+                return
 
     def _render_fp_preview(self):
         try:
@@ -5898,7 +6077,8 @@ class MainWindow(QMainWindow):
         self._release_camera()       # never reuse a handle from an earlier session
         self._wait_old_cameras()
         self._create_camera()
-        self.camera.crop = True
+        self.camera.crop = not _full_frame()
+        self._adjust = {}                # photo key -> (zoom, cx, cy) from the frame screen
         self.current_filter = "none"
         self.bts_buffer = []
         self.rolling_buffer = []
@@ -6058,6 +6238,8 @@ class MainWindow(QMainWindow):
                 img = _match_color_to(img, getattr(self, "_live_color_ref", None))
             except Exception as e:
                 LOG.warning(f"[COLOR] live-view colour match failed: {e}")
+        if _full_frame():
+            aspect = img.shape[1] / float(max(1, img.shape[0]))   # keep the whole frame
         self._show_shot_review(
             _crop_to_aspect(img, aspect, self._canon_max_long))
 
@@ -6198,6 +6380,8 @@ class MainWindow(QMainWindow):
 
     def _goto_frame_picker(self):
         self.current_filter = "none"
+        self._fp_sub.setText("Ketuk foto di frame untuk menggeser / memperbesar" if _full_frame()
+                             else "Pilih desain yang paling cocok untuk momen kamu")
         icfg = CONFIG.get("individual_photos", {}) or {}
         self.chk_indiv_fx.setChecked(bool(icfg.get("apply_filter", True)))
         self._fp_sel = None
@@ -6791,6 +6975,8 @@ class MainWindow(QMainWindow):
             if 0 <= pose_idx < len(self.captured_frames):
                 slot_pose_pairs.append((rect, pose_idx))
         canvas = Image.new("RGBA", (ow, oh), (255, 255, 255, 255))
+        self._fp_hits = list(slot_pose_pairs)      # hole rects, for taps on the preview
+        self._fp_canvas_wh = (ow, oh)
         flt = getattr(self, "current_filter", "none")
         bty = 0.0 if _true_color() else float(CONFIG.get("beautify_strength", 0.0))
         if has_transparent_slots:
@@ -6799,6 +6985,18 @@ class MainWindow(QMainWindow):
                 x, y, cw, ch = rect
                 if cw < 1 or ch < 1: continue
                 f = self.captured_frames[pose_idx]
+                adj = self._adjust_for(pose_idx)
+                if adj is not None:
+                    # Placed by the guest on the frame screen.
+                    img_bgr = crop_adjusted(f, int(cw), int(ch), adj)
+                    if bty > 0: img_bgr = beautify(img_bgr, bty)
+                    img_bgr = apply_filter(img_bgr, flt)
+                    img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+                    if mask is None:
+                        canvas.paste(img, (int(x), int(y)))
+                    else:
+                        canvas.paste(img, (int(x), int(y)), Image.fromarray(mask, "L"))
+                    continue
                 # Filter at about the size it will be placed, then position it.
                 if mask is None:
                     img_bgr = crop_center_to_aspect(f, cw, ch, fit_mode=getattr(self, "fit_mode", "cover"))
@@ -6817,12 +7015,95 @@ class MainWindow(QMainWindow):
                 x, y, cw, ch = rect
                 if cw < 1 or ch < 1: continue
                 f = self.captured_frames[pose_idx]
-                img_bgr = crop_center_to_aspect(f, cw, ch, fit_mode=getattr(self, "fit_mode", "cover"))
+                adj = self._adjust_for(pose_idx)
+                if adj is not None:
+                    img_bgr = crop_adjusted(f, int(cw), int(ch), adj)
+                else:
+                    img_bgr = crop_center_to_aspect(f, cw, ch, fit_mode=getattr(self, "fit_mode", "cover"))
                 if bty > 0: img_bgr = beautify(img_bgr, bty)
                 img_bgr = apply_filter(img_bgr, flt)
                 img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
                 canvas.paste(img, (x, y))
         return canvas
+
+    def _photo_key(self, idx):
+        """Same key as the frame-screen thumbnails: the photo, not its slot, so a
+        placement follows the photo when two photos swap places."""
+        if self.pick_pool and self.all_shots and idx < len(self.pick_pool):
+            return self.pick_pool[idx]
+        return f"c{idx}"
+
+    def _adjust_for(self, pose_idx):
+        return (getattr(self, "_adjust", None) or {}).get(self._photo_key(pose_idx))
+
+    def _open_adjust(self, pose_idx, rect):
+        """Editor over the frame screen: move / zoom one photo inside its hole."""
+        if pose_idx >= len(self.captured_frames):
+            return
+        host = self.frames_screen
+        dim = QWidget(host)
+        dim.setAttribute(Qt.WA_StyledBackground, True)
+        dim.setStyleSheet("background: rgba(26, 25, 24, 200);")
+        dim.setGeometry(0, 0, host.width(), host.height())
+        _, _, rw, rh = rect
+        aspect = rw / float(max(1, rh))
+        vh = int(host.height() * 0.62)
+        vw = int(vh * aspect)
+        if vw > host.width() * 0.7:
+            vw = int(host.width() * 0.7)
+            vh = int(vw / aspect)
+        title = QLabel(f"Atur foto {pose_idx + 1}", dim)
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: white; font-size: 34px; font-weight: 800; background: transparent;")
+        title.setGeometry(0, 30, host.width(), 50)
+        hint = QLabel("Geser foto dengan jari  \u00b7  perbesar dengan + / \u2212", dim)
+        hint.setAlignment(Qt.AlignCenter)
+        hint.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 18px; font-weight: 600; "
+                           "background: transparent;")
+        hint.setGeometry(0, 82, host.width(), 30)
+        view = AdjustView(dim)
+        view.setStyleSheet("background: black; border: 2px solid white;")
+        top = 124
+        view.setGeometry((host.width() - vw) // 2, top, vw, vh)
+        f = self.captured_frames[pose_idx]
+        view.set_photo(f, aspect, self._adjust_for(pose_idx) or (1.0, 0.5, 0.5))
+        row_y = top + vh + 24
+        btn_css = ("QPushButton { background: white; color: #1A1918; border: 1px solid white; "
+                   "border-radius: 6px; font-size: 24px; font-weight: 800; }"
+                   "QPushButton:pressed { padding-top: 2px; }")
+        specs = (("\u2212", 90, lambda: view.zoom_by(1 / 1.15)),
+                 ("+", 90, lambda: view.zoom_by(1.15)),
+                 ("Reset", 160, lambda: (setattr(view, "adj", (1.0, 0.5, 0.5)), view.render())),
+                 ("Selesai", 220, None))
+        total = sum(w for _, w, _ in specs) + 16 * (len(specs) - 1)
+        x = (host.width() - total) // 2
+        for text, w, fn in specs:
+            b = QPushButton(text, dim)
+            b.setGeometry(x, row_y, w, 70)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setStyleSheet(btn_css if fn else btn_css.replace("background: white; color: #1A1918",
+                                                               f"background: {COLORS['pink']}; color: white")
+                            .replace("border: 1px solid white", f"border: 1px solid {COLORS['pink']}"))
+            if fn:
+                b.clicked.connect(fn)
+            else:
+                def done():
+                    if not hasattr(self, "_adjust") or self._adjust is None:
+                        self._adjust = {}
+                    key = self._photo_key(pose_idx)
+                    self._adjust[key] = view.adj
+                    LOG.info(f"[FRAME] photo {pose_idx + 1} placed: zoom {view.adj[0]:.2f} "
+                             f"centre {view.adj[1]:.2f},{view.adj[2]:.2f}")
+                    dim.deleteLater()
+                    self._fp_thumb_cache = {k: v for k, v in self._fp_thumb_cache.items()
+                                            if k[0] != key}
+                    self._populate_fp_slots()
+                    self._render_fp_preview()
+                b.clicked.connect(done)
+            x += w + 16
+        dim.show()
+        dim.raise_()
 
     def _slot_to_pose_mapping(self):
         m = self.current_layout.get("slot_to_pose") if self.current_layout else None
