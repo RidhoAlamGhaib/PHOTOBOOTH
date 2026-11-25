@@ -79,6 +79,19 @@ class WebBridge(QObject):
         self._queue.append((path, payload, callback, False))
         self._pump()
 
+    def shutdown(self):
+        """Close the hidden window. It counts as an open top-level window, so while
+        it exists Qt never quits when the main window closes."""
+        self._queue = []
+        self._ready_waiters = []
+        try:
+            self.page.triggerAction(QWebEnginePage.Stop)
+            self.view.close()
+            self.page.deleteLater()           # page before view / profile
+            self.view.deleteLater()
+        except Exception as e:
+            LOG.warning(f"[WEB] shutdown: {e}")
+
     # ---- internals ----------------------------------------------------------
     def _on_load_finished(self, ok):
         url = self.page.url().toString()

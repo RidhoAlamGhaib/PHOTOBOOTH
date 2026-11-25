@@ -7219,9 +7219,41 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(self.SCREEN_HOME)
 
     def closeEvent(self, event):
-        self._release_camera()
-        self._wait_old_cameras()
+        self._shutdown()
         event.accept()
+        QTimer.singleShot(0, QApplication.instance().quit)
+
+    def _shutdown(self):
+        """Stop everything that keeps running in the background, so closing the
+        window really ends the app (timers, printer monitor, hidden browser,
+        camera, video encoding)."""
+        if getattr(self, "_shut_down", False):
+            return
+        self._shut_down = True
+        LOG.info("[EXIT] shutting down")
+        for t in self.findChildren(QTimer):
+            t.stop()
+        if getattr(self, "dnp", None) is not None:
+            try:
+                self.dnp.stop()
+            except Exception as e:
+                LOG.warning(f"[EXIT] printer monitor stop: {e}")
+        if getattr(self, "web_bridge", None) is not None:
+            self.web_bridge.shutdown()
+            self.web_bridge = None
+        try:
+            self._release_camera()
+            self._wait_old_cameras()
+        except Exception as e:
+            LOG.warning(f"[EXIT] camera release failed: {e}")
+        saver = getattr(self, "_bg_saver", None)
+        if saver is not None and saver.isRunning():
+            LOG.info("[EXIT] waiting for video encoding (max 10 s)")
+            if not saver.wait(10000):
+                LOG.warning("[EXIT] video encoding still running, stopped with the app")
+        for w in QApplication.topLevelWidgets():   # stray windows keep Qt alive
+            if w is not self:
+                w.close()
 
     def _ask_exit(self):
         """Password prompt before the app closes (corner taps or Esc)."""
@@ -7482,4 +7514,10 @@ if __name__ == "__main__":
     _apply_ui_scaling(app)
     win = MainWindow()
     _install_exit_camera_cleanup(app, win)
-    sys.exit(app.exec_())
+    code = app.exec_()
+    win._shutdown()
+    LOG.info(f"[EXIT] app closed (code {code})")
+    logging.shutdown()
+    # End the process now: an upload / encode thread still running would otherwise
+    # keep it alive in the background (unsent sessions stay in pending_sessions.json).
+    _os._exit(code)
