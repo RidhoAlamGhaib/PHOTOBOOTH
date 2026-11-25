@@ -730,7 +730,7 @@ def make_qris_client():
     return QrisClient()
 
 
-def coupon_result_from(status, data, err):
+def coupon_result_from(status, data, err, path="/booth/coupon"):
     """(status, data, error) from the bridge's POST /booth/coupon ->
     ("ok", data) / ("not_found" | "not_paid", message) / ("error", message)."""
     if status == 200 and isinstance(data, dict) and data.get("valid"):
@@ -740,9 +740,9 @@ def coupon_result_from(status, data, err):
         return (reason if reason in ("not_paid", "used") else "not_found"), \
             data.get("message") or "Kode tidak ditemukan"
     hint = _body_hint((err or "").encode("utf-8")) if err else json.dumps(data)[:200]
-    LOG.warning(f"[COUPON] bridge check failed: HTTP {status}: {hint}")
+    LOG.warning(f"[COUPON] {path} failed: HTTP {status}: {hint}")
     why = {0: "tidak tersambung ke website", 401: "API key beda",
-           404: "route /booth/coupon belum ada", 419: "sesi web kedaluwarsa",
+           404: f"route {path} belum ada di website", 419: "sesi web kedaluwarsa",
            500: "error di server/database"}.get(status, f"HTTP {status}")
     return "error", f"Kode belum bisa dicek ({why})"
 
@@ -4959,7 +4959,8 @@ class MainWindow(QMainWindow):
             "code": c["code"], "item_id": c.get("item_id"),
             "machine": str(CONFIG.get("booth_name", "") or ""),
             "outlet": str(CONFIG.get("outlet", "") or "")},
-            lambda st, data, err: self._coupon_used(job, *coupon_result_from(st, data, err)))
+            lambda st, data, err: self._coupon_used(
+                job, *coupon_result_from(st, data, err, "/booth/coupon/use")))
 
     def _coupon_used(self, job, status, data):
         if job is not self._cs_job:
