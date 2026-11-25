@@ -341,7 +341,9 @@ _FALLBACK_DEFAULTS = {
         "app_title":        "Photobooth Ceria",
         "tagline":          "Abadikan momen seru kamu — empat foto, satu memori.",
         "start_button":     "Mulai Sesi  →",
-        # Picture behind every screen, e.g. "backgrounds/pink.jpg"; empty = pastel default.
+        # Picture behind each step, e.g. "backgrounds/pink.jpg"; empty = background_image,
+        # and when that is empty too, the plain paper backdrop.
+        "backgrounds": {"home": "", "capture": "", "payment": "", "edit": "", "print": ""},
         "background_image": "",
     },  
     }
@@ -444,6 +446,12 @@ def save_config_values(values):
 
 BACKGROUND_DIR = BASE_DIR / "backgrounds"
 
+
+def screen_background(step):
+    """Picture for a step (home, payment, capture, edit, print), else the general one."""
+    ui = CONFIG.get("ui", {}) or {}
+    return str(((ui.get("backgrounds") or {}).get(step)) or ui.get("background_image") or "")
+
 # Settings screen: (section, [(config key, label, kind, choices)]).
 # kind: "text", "int", "choice" (choices = [(value, label)]), "background".
 _YES_NO = [(True, "Ya"), (False, "Tidak")]
@@ -482,7 +490,11 @@ SETTINGS_SPEC = [
         ("ui.app_title", "Judul halaman awal", "text", None),
         ("ui.tagline", "Tagline", "text", None),
         ("ui.start_button", "Tulisan tombol mulai", "text", None),
-        ("ui.background_image", "Background", "background", None),
+        ("ui.backgrounds.home", "Background: halaman awal", "background", None),
+        ("ui.backgrounds.payment", "Background: bayar / kode", "background", None),
+        ("ui.backgrounds.capture", "Background: ambil foto", "background", None),
+        ("ui.backgrounds.edit", "Background: pilih foto & frame", "background", None),
+        ("ui.backgrounds.print", "Background: cetak & selesai", "background", None),
     ]),
 ]
 
@@ -1325,18 +1337,18 @@ def _setup_fonts(app):
             if n in fams:
                 return n
         return "Segoe UI"
-    FONT_UI = _pick("Plus Jakarta Sans", "Segoe UI")
-    FONT_DISPLAY = _pick("Instrument Serif", "Georgia", "Segoe UI")
-    FONT_MONO = _pick("JetBrains Mono", "Consolas", "Courier New")
+    # Fun, rounded photobooth type: Fredoka for titles and numbers, Nunito for text.
+    FONT_UI = _pick("Nunito", "Poppins", "Quicksand", "Segoe UI")
+    FONT_DISPLAY = _pick("Fredoka", "Poppins", "Segoe UI Black", "Segoe UI")
+    FONT_MONO = FONT_DISPLAY          # figures (prices, timers, counters) in Fredoka too
     app.setFont(QFont(FONT_UI, 11))
     LOG.info(f"[FONT] ui={FONT_UI!r} display={FONT_DISPLAY!r} mono={FONT_MONO!r}")
 
 
 def _install_restyle():
     """Every style sheet goes through here: paper palette, flat accent instead of
-    gradients, restrained corners (<= 6px), hairline borders, serif headings
-    (regular weight, tight tracking), mono for tracked uppercase tags, and a 1px
-    press for buttons."""
+    gradients, restrained corners (<= 6px), hairline borders, modest tracking on
+    uppercase tags, and a 1px press for buttons."""
     import re
     grad = re.compile(r"qlineargradient\(\s*x1:[^,]*,\s*y1:[^,]*,\s*x2:[^,]*,\s*y2:[^,]*,\s*"
                       r"stop:0\s+([^,]+?)\s*,\s*stop:1\s+[^)]+\)")
@@ -1344,7 +1356,6 @@ def _install_restyle():
     radius = re.compile(r"border-radius:\s*(\d+)px")
     border = re.compile(r"(border(?:-[a-z]+)?:\s*)(\d+)px(\s+(?:solid|dashed))")
     tracked = re.compile(r"letter-spacing:\s*(\d+)px")
-    weight = re.compile(r"font-weight:\s*\d+")
 
     def restyle(css):
         if not css:
@@ -1353,17 +1364,9 @@ def _install_restyle():
         css = hexes.sub(lambda m: _HEX_MAP[m.group(0).upper()], css)
         css = radius.sub(lambda m: f"border-radius: {min(int(m.group(1)), 6)}px", css)
         css = border.sub(lambda m: f"{m.group(1)}{1 if int(m.group(2)) <= 2 else 2}px{m.group(3)}", css)
-        if FONT_DISPLAY in css:                     # serif headings: one weight, tight
-            css = weight.sub("font-weight: 400", css)
-            if "letter-spacing" not in css:
-                css = css.replace(f"font-family: '{FONT_DISPLAY}';",
-                                  f"font-family: '{FONT_DISPLAY}'; letter-spacing: -1px;")
-        else:
-            t = tracked.search(css)
-            if t and int(t.group(1)) >= 3:           # tags: mono, modest tracking
-                css = tracked.sub("letter-spacing: 2px", css)
-                if "font-family" not in css:
-                    css = css.rstrip().rstrip(";") + f"; font-family: '{FONT_MONO}';"
+        t = tracked.search(css)
+        if t and int(t.group(1)) >= 3:               # tags: modest tracking
+            css = tracked.sub("letter-spacing: 2px", css)
         if "QPushButton" in css and ":pressed" not in css:
             css += "\nQPushButton:pressed { margin-top: 1px; }"
         return css
@@ -1556,13 +1559,21 @@ class PastelBackground(QWidget):
                            rnd.choice(palette), rnd.randint(16, 34))
                           for _ in range(0)]   # sticker glyphs disabled (clean look)
         self._img = None
-        self.set_image((CONFIG.get("ui", {}) or {}).get("background_image", ""))
+        self.set_image(screen_background("home"))
 
     def set_image(self, path):
-        """Use a picture (path relative to the app folder) instead of the pastel
-        backdrop; empty or missing file = pastel."""
+        """Use a picture (path relative to the app folder) instead of the paper
+        backdrop; empty or missing file = paper. Pictures are kept once loaded,
+        so switching screens is instant."""
+        if path == getattr(self, "_path", None) and (self._img is not None or not path):
+            return
+        self._path = path
         self._img = None
-        if path:
+        if not hasattr(self, "_pics"):
+            self._pics = {}
+        if path in self._pics:
+            self._img = self._pics[path]
+        elif path:
             f = Path(path)
             if not f.is_absolute():
                 f = BASE_DIR / f
@@ -1571,6 +1582,7 @@ class PastelBackground(QWidget):
                 LOG.warning(f"[UI] background image not usable: {f}")
             else:
                 self._img = pm
+                self._pics[path] = pm
         self._cache = None
         self.update()
 
@@ -2983,6 +2995,7 @@ class MainWindow(QMainWindow):
         _bg_l.setContentsMargins(0, 0, 0, 0)
         _bg_l.addWidget(self.stack)
         self.setCentralWidget(self._bg)
+        self.stack.currentChanged.connect(self._apply_screen_background)   # picture per step
         self._top_bar_widget = None
         self._build_homepage()
         self._build_layout_picker()
@@ -3311,8 +3324,8 @@ class MainWindow(QMainWindow):
         col.addSpacing(18)
         title = QLabel("")
         title.setWordWrap(True)
-        title.setStyleSheet(f"color: {ink}; font-size: 132px; font-family: '{FONT_DISPLAY}'; "
-                            f"background: transparent;")
+        title.setStyleSheet(f"color: {ink}; font-size: 120px; font-weight: 700; "
+                            f"font-family: '{FONT_DISPLAY}'; background: transparent;")
         self.home_title = title
         col.addWidget(title)
         col.addSpacing(14)
@@ -5813,7 +5826,7 @@ class MainWindow(QMainWindow):
         if idx >= 0:
             self._set_selected_frame_button(idx)
         if self.stack.currentIndex() == self.SCREEN_FRAMES:
-            self._render_fp_preview()
+            self._fit_fp_layout()            # preview box follows the frame's shape
 
     def _fp_items(self):
         """Photos for the frame-picker column, in order: the first
@@ -6037,10 +6050,17 @@ class MainWindow(QMainWindow):
                 "letter-spacing: 4px; background: transparent; padding: 4px 4px 8px 4px;"
             )
         self.btn_back_picker.hide()
+        # Preview: the frame's own shape, ~12% bigger than the old fixed 3:4 box.
         target_ratio = 3 / 4
-        pc_h = int(avail_h * 0.95)
+        try:
+            if getattr(self, "overlay_path", None):
+                with Image.open(self.overlay_path) as _im:
+                    target_ratio = _im.width / float(max(1, _im.height))
+        except Exception:
+            pass
+        pc_h = int(avail_h * 1.0)
         pc_w = int(pc_h * target_ratio)
-        max_pc_w = int(sw * 0.30)
+        max_pc_w = int(sw * 0.38)
         if pc_w > max_pc_w:
             pc_w = max_pc_w
             pc_h = int(pc_w / target_ratio)
@@ -6050,48 +6070,39 @@ class MainWindow(QMainWindow):
         N = max(1, min(MAX_SLOTS, self.shots_per_session))
         items = self._fp_items()
         P = max(N, min(MAX_SLOTS, len(items)))
+        # Photos: two columns, every tile the same size (frame photos first).
+        cols = 2
         side_margin = 32
-        slot_gap_y = 14
-        pad = 12   # room for the drop shadows inside the scroll area
+        gap = 12
+        pad = 10
         l_area_x = side_margin
-        l_area_w = pc_x - 30 - l_area_x
+        l_area_w = max(160, pc_x - 30 - l_area_x)
         hint_h = 32
-        col_y = pc_y + hint_h
-        col_h = pc_h - hint_h
-        self.fp_slot_hint.setGeometry(l_area_x, pc_y, l_area_w, hint_h - 4)
+        col_y = top_y + hint_h
+        col_h = (strip_y - 16) - col_y
+        self.fp_slot_hint.setGeometry(l_area_x, top_y, l_area_w, hint_h - 4)
         self.fp_slot_hint.setVisible(len(items) > 1)
-        slot_w_cap = 300
-        max_l_slot_w = min(slot_w_cap, max(140, l_area_w - 2 * pad - 10))
-
-        def _aspect(i):
-            if i < N:
-                return self.pose_aspects[i] if i < len(self.pose_aspects) else 3 / 4
-            if i < len(items):
-                fh, fw = items[i].shape[:2]
-                return fw / max(1, fh)
-            return 3 / 4
-        # Size so the N frame slots fit without scrolling; spares scroll.
-        max_slot_h = (col_h - 2 * pad - slot_gap_y * (N - 1)) // max(1, N)
-        max_aspect = max((_aspect(i) for i in range(N)), default=3/4)
-        h_from_w = int(max_l_slot_w / max(0.1, max_aspect))
-        slot_h = max(72, min(max_slot_h, h_from_w))
-        for s in self.fp_slot_widgets:
-            s.setVisible(False)
-        stack_h = P * slot_h + (P - 1) * slot_gap_y + 2 * pad
-        widest = max(min(max_l_slot_w, max(40, int(round(slot_h * _aspect(i)))))
-                     for i in range(P))
-        bar_w = 14 if stack_h > col_h else 0
-        host_w = widest + 2 * pad
+        tile_aspect = self.pose_aspects[0] if self.pose_aspects else 3 / 4
+        bar_w = 14
+        tile_w = min(260, (l_area_w - 2 * pad - gap - bar_w) // cols)
+        rows_frame = (N + cols - 1) // cols
+        max_tile_h = (col_h - 2 * pad - gap * (rows_frame - 1)) // max(1, rows_frame)
+        tile_h = int(tile_w / max(0.1, tile_aspect))
+        if tile_h > max_tile_h:             # the frame photos fit without scrolling
+            tile_h = max(60, max_tile_h)
+            tile_w = int(tile_h * tile_aspect)
+        rows = (P + cols - 1) // cols
+        host_w = cols * tile_w + (cols - 1) * gap + 2 * pad
+        stack_h = rows * tile_h + (rows - 1) * gap + 2 * pad
         col_w = min(l_area_w, host_w + bar_w)
         self.fp_slot_scroll.setGeometry(l_area_x + (l_area_w - col_w) // 2, col_y, col_w, col_h)
         self.fp_slot_host.resize(host_w, max(stack_h, col_h))
-        y_start = pad + max(0, (col_h - stack_h) // 2)
+        for s_ in self.fp_slot_widgets:
+            s_.setVisible(False)
         for i in range(P):
-            w_for_this = max(40, int(round(slot_h * _aspect(i))))
-            w_for_this = min(w_for_this, max_l_slot_w)
-            x = (host_w - w_for_this) // 2
-            self.fp_slot_widgets[i].setGeometry(
-                x, y_start + i * (slot_h + slot_gap_y), w_for_this, slot_h)
+            r, c = divmod(i, cols)
+            self.fp_slot_widgets[i].setGeometry(pad + c * (tile_w + gap), pad + r * (tile_h + gap),
+                                                tile_w, tile_h)
             self.fp_slot_widgets[i].setVisible(True)
         for slot in self.fp_slot_widgets:
             sw_s = slot.width(); sh_s = slot.height()
@@ -7920,6 +7931,7 @@ class MainWindow(QMainWindow):
                     self._st_widgets[key] = (kind, btns)
                 elif kind == "background":
                     wrap = QWidget()
+                    wrap.setProperty("bg_key", key)
                     wrap.setStyleSheet("background: transparent;")
                     vl = QVBoxLayout(wrap)
                     vl.setContentsMargins(0, 0, 0, 0)
@@ -7931,19 +7943,20 @@ class MainWindow(QMainWindow):
                     strip.setStyleSheet("QScrollArea { border: none; background: transparent; }"
                                         "QScrollArea > QWidget > QWidget { background: transparent; }")
                     strip_host = QWidget()
-                    self._st_bg_row = QHBoxLayout(strip_host)
-                    self._st_bg_row.setContentsMargins(0, 0, 0, 0)
-                    self._st_bg_row.setSpacing(12)
+                    bg_row = QHBoxLayout(strip_host)
+                    bg_row.setContentsMargins(0, 0, 0, 0)
+                    bg_row.setSpacing(12)
                     strip.setWidget(strip_host)
                     enable_touch_scroll(strip)
                     vl.addWidget(strip)
-                    hint = QLabel(f"Taruh gambar .jpg / .png di folder: {BACKGROUND_DIR}")
-                    hint.setWordWrap(True)
-                    hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 15px; font-weight: 600; "
-                                       f"background: transparent;")
-                    vl.addWidget(hint)
+                    if key.endswith(".home"):
+                        hint = QLabel(f"Taruh gambar .jpg / .png di folder: {BACKGROUND_DIR}")
+                        hint.setWordWrap(True)
+                        hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 15px; font-weight: 600; "
+                                           f"background: transparent;")
+                        vl.addWidget(hint)
                     grid.addWidget(wrap, row, 1)
-                    self._st_widgets[key] = (kind, None)
+                    self._st_widgets[key] = (kind, {"row": bg_row, "buttons": []})
             form.addWidget(card)
         form.addStretch(1)
         scroll.setWidget(host)
@@ -7953,12 +7966,12 @@ class MainWindow(QMainWindow):
         root.addWidget(self.st_keyboard, 0, Qt.AlignHCenter)
         self.stack.addWidget(screen)
         self.SCREEN_SETTINGS = self.stack.indexOf(screen)
-        self._st_bg_buttons = []
 
-    def _fill_background_choices(self, current):
+    def _fill_background_choices(self, slot, current):
         """Thumbnails of the pictures in backgrounds/, plus the pastel default."""
-        while self._st_bg_row.count():
-            item = self._st_bg_row.takeAt(0)
+        row = slot["row"]
+        while row.count():
+            item = row.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         try:
@@ -7967,7 +7980,7 @@ class MainWindow(QMainWindow):
             LOG.warning(f"[SETTINGS] cannot create {BACKGROUND_DIR}: {e}")
         files = sorted(p for p in BACKGROUND_DIR.glob("*")
                        if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp"))
-        self._st_bg_buttons = []
+        slot["buttons"] = []
         options = [("", "Default")] + [(f"{BACKGROUND_DIR.name}/{p.name}", p.name) for p in files]
         cur = (current or "").replace("\\", "/")
         for value, name in options:
@@ -7991,11 +8004,11 @@ class MainWindow(QMainWindow):
                                border-radius: 16px; font-size: 14px; font-weight: 700; padding: 6px; }}
                 QToolButton:checked {{ border: 5px solid {COLORS['pink']}; }}""")
             b.setChecked(value == cur)
-            self._st_bg_row.addWidget(b)
-            self._st_bg_buttons.append((value, b))
-        if not any(b.isChecked() for _, b in self._st_bg_buttons):
-            self._st_bg_buttons[0][1].setChecked(True)
-        self._st_bg_row.addStretch(1)
+            row.addWidget(b)
+            slot["buttons"].append((value, b))
+        if not any(b.isChecked() for _, b in slot["buttons"]):
+            slot["buttons"][0][1].setChecked(True)
+        row.addStretch(1)
 
     def _open_settings(self):
         if not hasattr(self, "SCREEN_SETTINGS"):
@@ -8008,7 +8021,7 @@ class MainWindow(QMainWindow):
                 for value, b in w:
                     b.setChecked(value == val or str(value) == str(val))
             elif kind == "background":
-                self._fill_background_choices(val)
+                self._fill_background_choices(w, val)
         self.st_status.setText("")
         first = next((w for kind, w in self._st_widgets.values() if kind in ("text", "int")), None)
         self.st_keyboard.target = first
@@ -8033,8 +8046,9 @@ class MainWindow(QMainWindow):
                 if picked:
                     values[key] = picked[0]
             elif kind == "background":
-                picked = [value for value, b in self._st_bg_buttons if b.isChecked()]
+                picked = [value for value, b in w["buttons"] if b.isChecked()]
                 values[key] = picked[0] if picked else ""
+                values["ui.background_image"] = ""      # per-step pictures replace the old single one
         try:
             save_config_values(values)
         except Exception as e:
@@ -8042,13 +8056,28 @@ class MainWindow(QMainWindow):
             self.st_status.setText(f"Gagal simpan: {e}")
             return
         # Most settings are read when used; refresh the ones kept on screen / in memory.
-        self._bg.set_image(cfg_get("ui.background_image", ""))
         self._refresh_home_texts()
         self.max_retakes_per_shot = int(cfg_get("max_retakes_per_shot", 2) or 0)
         self.qris = make_qris_client()
         self._reset_to_home()
+        self._apply_screen_background()
         self._show_popup(self.stack.widget(self.SCREEN_HOME), "Tersimpan",
                          "Setting baru langsung dipakai mulai sesi berikutnya.")
+
+    def _screen_step(self, index):
+        groups = (("payment", ("SCREEN_PAYMENT", "SCREEN_CODE", "SCREEN_COUPON", "SCREEN_COUPON_START")),
+                  ("capture", ("SCREEN_CAPTURE",)),
+                  ("edit", ("SCREEN_PICK", "SCREEN_FRAMES")),
+                  ("print", ("SCREEN_PRINT", "SCREEN_DONE")))
+        for step, names in groups:
+            if index in [getattr(self, n, -1) for n in names]:
+                return step
+        return "home"                       # home, layout picker, contact form, settings
+
+    def _apply_screen_background(self, index=None):
+        if index is None:
+            index = self.stack.currentIndex()
+        self._bg.set_image(screen_background(self._screen_step(index)))
 
     def _admin_menu(self):
         """Choice after the admin password: open settings or quit the app."""
