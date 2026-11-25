@@ -40,6 +40,7 @@ if exist codes.json          copy /Y codes.json          dist\NeoPhoto\ >nul
 if exist thank_you.png       copy /Y thank_you.png       dist\NeoPhoto\ >nul
 if exist thank_you.txt       copy /Y thank_you.txt       dist\NeoPhoto\ >nul
 if exist fonts               xcopy /E /I /Y fonts dist\NeoPhoto\fonts >nul
+if exist backgrounds         xcopy /E /I /Y backgrounds dist\NeoPhoto\backgrounds >nul
 echo.
 echo Done: dist\NeoPhoto\NeoPhoto.exe
 pause

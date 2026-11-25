@@ -34,7 +34,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
     QStackedWidget, QFrame, QProgressBar, QGraphicsDropShadowEffect, QScroller, QCheckBox,
     QScrollerProperties,
-    QLineEdit
+    QLineEdit, QToolButton
 )
 from PyQt5.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QSize, QUrl, QByteArray, QPointF, QRectF, QEvent,
@@ -335,6 +335,8 @@ _FALLBACK_DEFAULTS = {
         "app_title":        "Photobooth Ceria",
         "tagline":          "Abadikan momen seru kamu — empat foto, satu memori.",
         "start_button":     "Mulai Sesi  →",
+        # Picture behind every screen, e.g. "backgrounds/pink.jpg"; empty = pastel default.
+        "background_image": "",
     },  
     }
 
@@ -396,6 +398,88 @@ def _load_app_config():
         except Exception as e:
             _cfg_print(f"[CONFIG] FAILED to write default {cfg_file}: {e}")
     return cfg
+
+def cfg_get(dotted, default=None):
+    """CONFIG value by "a.b.c" path."""
+    cur = CONFIG
+    for k in dotted.split("."):
+        if not isinstance(cur, dict) or k not in cur:
+            return default
+        cur = cur[k]
+    return cur
+
+
+def save_config_values(values):
+    """Write {"a.b": value} into config.json (only those keys; the rest of the
+    file is kept) and into the running CONFIG. Keeps config.json.bak."""
+    import os, shutil
+    path = _resolve_config_path()
+    raw = {}
+    if path.exists():
+        with open(path, "r", encoding="utf-8-sig") as f:
+            raw = json.load(f)          # unreadable file: raise, never overwrite it
+        shutil.copyfile(path, path.with_name(path.name + ".bak"))
+    for dotted, value in values.items():
+        keys = dotted.split(".")
+        for target in (raw, CONFIG):
+            cur = target
+            for k in keys[:-1]:
+                if not isinstance(cur.get(k), dict):
+                    cur[k] = {}
+                cur = cur[k]
+            cur[keys[-1]] = value
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(raw, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, path)
+    LOG.info(f"[SETTINGS] saved {', '.join(sorted(values))} to {path}")
+
+
+BACKGROUND_DIR = BASE_DIR / "backgrounds"
+
+# Settings screen: (section, [(config key, label, kind, choices)]).
+# kind: "text", "int", "choice" (choices = [(value, label)]), "background".
+_YES_NO = [(True, "Ya"), (False, "Tidak")]
+SETTINGS_SPEC = [
+    ("Mesin", [
+        ("booth_name", "Nama / nomor mesin", "text", None),
+        ("outlet", "Outlet", "text", None),
+        ("admin.exit_password", "Password admin (kosong = tanpa password)", "text", None),
+    ]),
+    ("Pembayaran", [
+        ("payment.mode", "Cara mulai sesi", "choice", [("qris", "Bayar QRIS"), ("coupon", "Kode kupon")]),
+        ("payment.qris_provider", "Penyedia QRIS", "choice", [("midtrans", "Midtrans"), ("bca", "BCA")]),
+        ("payment.coupon_start_minutes", "Waktu tekan MULAI (menit)", "int", None),
+        ("pricing.price", "Harga paket (Rp)", "int", None),
+        ("pricing.free_photos", "Foto gratis (0 = pose + bonus)", "int", None),
+        ("pricing.bonus_price", "Harga foto bonus (Rp)", "int", None),
+        ("pricing.extra_print_price", "Harga cetak tambahan (Rp)", "int", None),
+    ]),
+    ("Sesi foto", [
+        ("countdown_seconds", "Hitung mundur (detik)", "int", None),
+        ("camera_warmup_seconds", "Persiapan kamera (detik)", "int", None),
+        ("extra_shots", "Foto bonus per sesi", "int", None),
+        ("max_retakes_per_shot", "Maks. foto ulang per pose", "int", None),
+        ("review_auto_confirm_seconds", "Lanjut otomatis setelah (detik)", "int", None),
+        ("mirror", "Tampilan cermin", "choice", _YES_NO),
+        ("customer_form.enabled", "Form data customer (mode QRIS)", "choice", _YES_NO),
+    ]),
+    ("Cetak & upload", [
+        ("printing.enabled", "Cetak foto", "choice", _YES_NO),
+        ("printing.max_extra_prints", "Maks. cetak tambahan", "int", None),
+        ("gdrive.enabled", "Upload ke Google Drive", "choice", _YES_NO),
+        ("gdrive.event_name", "Nama event (folder Drive)", "text", None),
+    ]),
+    ("Tampilan", [
+        ("ui.studio_name", "Nama studio", "text", None),
+        ("ui.app_title", "Judul halaman awal", "text", None),
+        ("ui.tagline", "Tagline", "text", None),
+        ("ui.start_button", "Tulisan tombol mulai", "text", None),
+        ("ui.background_image", "Background", "background", None),
+    ]),
+]
+
 
 def _load_gdrive_config():
     return CONFIG.get("gdrive", {})
@@ -1338,6 +1422,24 @@ class PastelBackground(QWidget):
                            rnd.random(), rnd.choice(self.STICKERS),
                            rnd.choice(palette), rnd.randint(16, 34))
                           for _ in range(0)]   # sticker glyphs disabled (clean look)
+        self._img = None
+        self.set_image((CONFIG.get("ui", {}) or {}).get("background_image", ""))
+
+    def set_image(self, path):
+        """Use a picture (path relative to the app folder) instead of the pastel
+        backdrop; empty or missing file = pastel."""
+        self._img = None
+        if path:
+            f = Path(path)
+            if not f.is_absolute():
+                f = BASE_DIR / f
+            pm = QPixmap(str(f)) if f.exists() else QPixmap()
+            if pm.isNull():
+                LOG.warning(f"[UI] background image not usable: {f}")
+            else:
+                self._img = pm
+        self._cache = None
+        self.update()
 
     def resizeEvent(self, e):
         self._cache = None
@@ -1345,6 +1447,9 @@ class PastelBackground(QWidget):
 
     def _render(self):
         w, h = max(1, self.width()), max(1, self.height())
+        if self._img is not None:            # picture, cropped to fill (cover)
+            sc = self._img.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            return sc.copy((sc.width() - w) // 2, (sc.height() - h) // 2, w, h)
         pm = QPixmap(w, h)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
@@ -3012,8 +3117,22 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(screen)
         root.setContentsMargins(80, 40, 80, 40)
         root.setSpacing(0)
+        top = QHBoxLayout()
+        top.addStretch(1)
+        btn_admin = QPushButton("\u2699")
+        btn_admin.setFixedSize(64, 64)
+        btn_admin.setCursor(Qt.PointingHandCursor)
+        btn_admin.setFocusPolicy(Qt.NoFocus)
+        btn_admin.setStyleSheet(f"""
+            QPushButton {{ background: rgba(255,255,255,0.75); color: {COLORS['ink_soft']};
+                           border: 2px solid {COLORS['pink_soft']}; border-radius: 32px;
+                           font-size: 30px; }}""")
+        btn_admin.clicked.connect(self._ask_exit)
+        top.addWidget(btn_admin)
+        root.addLayout(top)
         root.addStretch(1)
         eyebrow = QLabel(f"{CONFIG['ui']['studio_name']}")
+        self.home_eyebrow = eyebrow
         eyebrow.setStyleSheet(f"""
             color: {COLORS['pink_dk']}; background: white;
             border: 2px solid {COLORS['pink_soft']}; border-radius: 22px;
@@ -3025,6 +3144,7 @@ class MainWindow(QMainWindow):
         root.addWidget(PolaroidCluster(), 0, Qt.AlignHCenter)
         root.addSpacing(14)
         title = QLabel(CONFIG["ui"]["app_title"])
+        self.home_title = title
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet(f"""
             color: {COLORS['ink']}; font-size: 104px; font-weight: 800;
@@ -3033,6 +3153,7 @@ class MainWindow(QMainWindow):
         root.addWidget(title)
         root.addSpacing(6)
         tagline = QLabel(CONFIG["ui"]["tagline"])
+        self.home_tagline = tagline
         tagline.setAlignment(Qt.AlignCenter)
         tagline.setStyleSheet(f"""
             color: {COLORS['ink_soft']}; font-size: 26px;
@@ -3058,21 +3179,31 @@ class MainWindow(QMainWindow):
         self._add_shadow(self.btn_start, blur=40, y_offset=14, alpha=160)
         root.addWidget(self.btn_start, 0, Qt.AlignHCenter)
         root.addSpacing(20)
-        extra = max(0, int(CONFIG.get("extra_shots", 0) or 0))
-        hint_txt = "tap tombol di atas untuk mulai"
-        if extra > 0:
-            hint_txt += f"   \u00b7   +{extra} foto bonus, pilih favoritmu"
-        hint = QLabel(hint_txt)
+        hint = QLabel("")
+        self.home_hint = hint
         hint.setAlignment(Qt.AlignCenter)
         hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; "
                            f"font-weight: 600; background: transparent;")
         root.addWidget(hint)
         root.addStretch(1)
+        self._refresh_home_texts()
         # Paper counter: small pill pinned to the top-left of the home screen.
         self.media_label = QLabel("", screen)
         self.media_label.move(24, 24)
         self.media_label.hide()
         self.stack.addWidget(screen)
+
+    def _refresh_home_texts(self):
+        ui = CONFIG.get("ui", {}) or {}
+        self.home_eyebrow.setText(str(ui.get("studio_name", "")))
+        self.home_title.setText(str(ui.get("app_title", "")))
+        self.home_tagline.setText(str(ui.get("tagline", "")))
+        self.btn_start.setText(str(ui.get("start_button", "")))
+        extra = max(0, int(CONFIG.get("extra_shots", 0) or 0))
+        hint_txt = "tap tombol di atas untuk mulai"
+        if extra > 0:
+            hint_txt += f"   \u00b7   +{extra} foto bonus, pilih favoritmu"
+        self.home_hint.setText(hint_txt)
 
     @staticmethod
     def _set_label_pixmap(label, pix):
@@ -4554,6 +4685,9 @@ class MainWindow(QMainWindow):
                         QTimer.singleShot(0, self._ask_exit)
                 else:
                     self._corner_taps = []
+        if (event.type() == QEvent.FocusIn and isinstance(obj, QLineEdit)
+                and obj in getattr(self, "_st_line_edits", ())):
+            self.st_keyboard.target = obj
         if (event.type() == QEvent.FocusIn and isinstance(obj, QLineEdit)
                 and obj in getattr(self, "cf_fields", {}).values()):
             self.cf_keyboard.target = obj
@@ -7257,10 +7391,14 @@ class MainWindow(QMainWindow):
                 w.close()
 
     def _ask_exit(self):
-        """Password prompt before the app closes (corner taps or Esc)."""
+        """Admin password (gear on the home screen, corner taps or Esc), then the
+        admin menu: settings or quit."""
         if self._exit_overlay is not None:
             return
         pw = str((CONFIG.get("admin", {}) or {}).get("exit_password", "") or "")
+        if not pw:
+            self._admin_menu()
+            return
         host = self.centralWidget()
         dim = QWidget(host)
         dim.setAttribute(Qt.WA_StyledBackground, True)
@@ -7272,7 +7410,7 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(box)
         lay.setContentsMargins(40, 30, 40, 30)
         lay.setSpacing(16)
-        title = QLabel("Keluar dari aplikasi?")
+        title = QLabel("Menu Admin")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 36px; font-weight: 800; "
                             f"font-family: '{FONT_DISPLAY}'; border: none;")
@@ -7299,7 +7437,7 @@ class MainWindow(QMainWindow):
         row.setSpacing(24)
         row.addStretch(1)
         btn_cancel = QPushButton("Batal")
-        btn_exit = QPushButton("Keluar")
+        btn_exit = QPushButton("Masuk")
         for b, primary in ((btn_cancel, False), (btn_exit, True)):
             b.setFixedSize(220, 66)
             b.setCursor(Qt.PointingHandCursor)
@@ -7327,11 +7465,10 @@ class MainWindow(QMainWindow):
             if pw and ed.text() != pw:
                 err.setText("Password salah")
                 ed.clear()
-                LOG.warning("[ADMIN] wrong exit password")
+                LOG.warning("[ADMIN] wrong admin password")
                 return
-            LOG.info("[ADMIN] exit by operator")
             close_overlay()
-            self.close()
+            self._admin_menu()
 
         btn_cancel.clicked.connect(close_overlay)
         btn_exit.clicked.connect(try_exit)
@@ -7343,6 +7480,311 @@ class MainWindow(QMainWindow):
         if ed is not None:
             ed.setFocus()
         # Nobody there? Close the prompt by itself.
+        QTimer.singleShot(30000, lambda: self._exit_overlay is dim and close_overlay())
+
+    # =============== SETTINGS (admin menu) ===============
+    def _build_settings_screen(self):
+        screen = QWidget()
+        screen.setStyleSheet("background: transparent;")
+        root = QVBoxLayout(screen)
+        root.setContentsMargins(60, 24, 60, 16)
+        root.setSpacing(10)
+        head = QHBoxLayout()
+        title = QLabel("Setting")
+        title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 44px; font-weight: 800; "
+                            f"font-family: '{FONT_DISPLAY}'; background: transparent;")
+        head.addWidget(title)
+        head.addStretch(1)
+        self.st_status = QLabel("")
+        self.st_status.setStyleSheet(f"color: {COLORS['danger']}; font-size: 20px; font-weight: 800; "
+                                     f"background: transparent;")
+        head.addWidget(self.st_status)
+        head.addSpacing(20)
+        btn_cancel = QPushButton("Batal")
+        btn_save = QPushButton("Simpan")
+        for b, primary in ((btn_cancel, False), (btn_save, True)):
+            b.setFixedSize(200, 64)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setStyleSheet(
+                f"QPushButton {{ background: {COLORS['pink'] if primary else 'white'}; "
+                f"color: {'white' if primary else COLORS['ink']}; border: 2px solid {COLORS['pink']}; "
+                f"border-radius: 32px; font-size: 22px; font-weight: 900; }}")
+            head.addWidget(b)
+        btn_cancel.clicked.connect(self._reset_to_home)
+        btn_save.clicked.connect(self._save_settings)
+        root.addLayout(head)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollBar:vertical { width: 14px; background: #FFE1EC; border-radius: 7px; }"
+            "QScrollBar::handle:vertical { background: #FF9CC0; border-radius: 7px; min-height: 40px; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }")
+        host = QWidget()
+        form = QVBoxLayout(host)
+        form.setContentsMargins(0, 0, 12, 0)
+        form.setSpacing(14)
+        field_css = f"""
+            QLineEdit {{ background: white; color: {COLORS['ink']}; border: 2px solid {COLORS['pink_soft']};
+                         border-radius: 12px; padding: 0 14px; font-size: 22px; font-weight: 600; }}
+            QLineEdit:focus {{ border: 3px solid {COLORS['pink']}; }}"""
+        choice_css = f"""
+            QPushButton {{ background: white; color: {COLORS['ink']}; border: 2px solid {COLORS['pink_soft']};
+                           border-radius: 26px; font-size: 20px; font-weight: 800; padding: 0 22px; }}
+            QPushButton:checked {{ background: {COLORS['pink']}; color: white; border-color: {COLORS['pink']}; }}"""
+        self._st_widgets = {}
+        self._st_line_edits = set()
+        for section, fields in SETTINGS_SPEC:
+            card = QWidget()
+            card.setAttribute(Qt.WA_StyledBackground, True)
+            card.setStyleSheet("background: rgba(255,255,255,0.85); border-radius: 22px;")
+            grid = QGridLayout(card)
+            grid.setContentsMargins(28, 18, 28, 18)
+            grid.setHorizontalSpacing(24)
+            grid.setVerticalSpacing(10)
+            head_lbl = QLabel(section.upper())
+            head_lbl.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 16px; font-weight: 800; "
+                                   f"letter-spacing: 4px; background: transparent;")
+            grid.addWidget(head_lbl, 0, 0, 1, 2)
+            for row, (key, label, kind, choices) in enumerate(fields, start=1):
+                lab = QLabel(label)
+                lab.setWordWrap(True)
+                lab.setStyleSheet(f"color: {COLORS['ink']}; font-size: 20px; font-weight: 700; "
+                                  f"background: transparent;")
+                lab.setFixedWidth(420)
+                grid.addWidget(lab, row, 0)
+                if kind in ("text", "int"):
+                    w = QLineEdit()
+                    w.setFixedHeight(54)
+                    w.setStyleSheet(field_css)
+                    if kind == "int":
+                        w.setValidator(QRegExpValidator(QRegExp(r"[0-9]{0,9}")))
+                        w.setMaximumWidth(260)
+                    w.installEventFilter(self)
+                    self._st_line_edits.add(w)
+                    grid.addWidget(w, row, 1)
+                    self._st_widgets[key] = (kind, w)
+                elif kind == "choice":
+                    box = QWidget()
+                    box.setStyleSheet("background: transparent;")
+                    hl = QHBoxLayout(box)
+                    hl.setContentsMargins(0, 0, 0, 0)
+                    hl.setSpacing(10)
+                    btns = []
+                    for value, text in choices:
+                        b = QPushButton(text)
+                        b.setCheckable(True)
+                        b.setAutoExclusive(True)
+                        b.setFixedHeight(52)
+                        b.setFocusPolicy(Qt.NoFocus)
+                        b.setCursor(Qt.PointingHandCursor)
+                        b.setStyleSheet(choice_css)
+                        hl.addWidget(b)
+                        btns.append((value, b))
+                    hl.addStretch(1)
+                    grid.addWidget(box, row, 1)
+                    self._st_widgets[key] = (kind, btns)
+                elif kind == "background":
+                    wrap = QWidget()
+                    wrap.setStyleSheet("background: transparent;")
+                    vl = QVBoxLayout(wrap)
+                    vl.setContentsMargins(0, 0, 0, 0)
+                    vl.setSpacing(6)
+                    strip = QScrollArea()
+                    strip.setWidgetResizable(True)
+                    strip.setFixedHeight(170)
+                    strip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                    strip.setStyleSheet("QScrollArea { border: none; background: transparent; }"
+                                        "QScrollArea > QWidget > QWidget { background: transparent; }")
+                    strip_host = QWidget()
+                    self._st_bg_row = QHBoxLayout(strip_host)
+                    self._st_bg_row.setContentsMargins(0, 0, 0, 0)
+                    self._st_bg_row.setSpacing(12)
+                    strip.setWidget(strip_host)
+                    enable_touch_scroll(strip)
+                    vl.addWidget(strip)
+                    hint = QLabel(f"Taruh gambar .jpg / .png di folder: {BACKGROUND_DIR}")
+                    hint.setWordWrap(True)
+                    hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 15px; font-weight: 600; "
+                                       f"background: transparent;")
+                    vl.addWidget(hint)
+                    grid.addWidget(wrap, row, 1)
+                    self._st_widgets[key] = (kind, None)
+            form.addWidget(card)
+        form.addStretch(1)
+        scroll.setWidget(host)
+        enable_touch_scroll(scroll)
+        root.addWidget(scroll, 1)
+        self.st_keyboard = OnScreenKeyboard()
+        root.addWidget(self.st_keyboard, 0, Qt.AlignHCenter)
+        self.stack.addWidget(screen)
+        self.SCREEN_SETTINGS = self.stack.indexOf(screen)
+        self._st_bg_buttons = []
+
+    def _fill_background_choices(self, current):
+        """Thumbnails of the pictures in backgrounds/, plus the pastel default."""
+        while self._st_bg_row.count():
+            item = self._st_bg_row.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        try:
+            BACKGROUND_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            LOG.warning(f"[SETTINGS] cannot create {BACKGROUND_DIR}: {e}")
+        files = sorted(p for p in BACKGROUND_DIR.glob("*")
+                       if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp"))
+        self._st_bg_buttons = []
+        options = [("", "Default")] + [(f"{BACKGROUND_DIR.name}/{p.name}", p.name) for p in files]
+        cur = (current or "").replace("\\", "/")
+        for value, name in options:
+            b = QToolButton()
+            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            b.setCheckable(True)
+            b.setAutoExclusive(True)
+            b.setFixedSize(200, 160)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolTip(name)
+            if value:
+                pm = QPixmap(str(BASE_DIR / value))
+                if not pm.isNull():
+                    b.setIcon(QIcon(pm.scaled(180, 110, Qt.KeepAspectRatioByExpanding,
+                                              Qt.SmoothTransformation)))
+                    b.setIconSize(QSize(180, 110))
+            b.setText(name if len(name) <= 22 else name[:20] + "\u2026")
+            b.setStyleSheet(f"""
+                QToolButton {{ background: white; color: {COLORS['ink']}; border: 3px solid {COLORS['pink_soft']};
+                               border-radius: 16px; font-size: 14px; font-weight: 700; padding: 6px; }}
+                QToolButton:checked {{ border: 5px solid {COLORS['pink']}; }}""")
+            b.setChecked(value == cur)
+            self._st_bg_row.addWidget(b)
+            self._st_bg_buttons.append((value, b))
+        if not any(b.isChecked() for _, b in self._st_bg_buttons):
+            self._st_bg_buttons[0][1].setChecked(True)
+        self._st_bg_row.addStretch(1)
+
+    def _open_settings(self):
+        if not hasattr(self, "SCREEN_SETTINGS"):
+            self._build_settings_screen()
+        for key, (kind, w) in self._st_widgets.items():
+            val = cfg_get(key, "")
+            if kind in ("text", "int"):
+                w.setText("" if val is None else str(val))
+            elif kind == "choice":
+                for value, b in w:
+                    b.setChecked(value == val or str(value) == str(val))
+            elif kind == "background":
+                self._fill_background_choices(val)
+        self.st_status.setText("")
+        first = next((w for kind, w in self._st_widgets.values() if kind in ("text", "int")), None)
+        self.st_keyboard.target = first
+        LOG.info("[ADMIN] settings opened")
+        self.stack.setCurrentIndex(self.SCREEN_SETTINGS)
+
+    def _save_settings(self):
+        labels = {key: label for _, fields in SETTINGS_SPEC for key, label, _, _ in fields}
+        values = {}
+        for key, (kind, w) in self._st_widgets.items():
+            if kind == "text":
+                values[key] = w.text().strip()
+            elif kind == "int":
+                txt = w.text().strip()
+                if not txt:
+                    self.st_status.setText(f"{labels[key]} belum diisi")
+                    w.setFocus()
+                    return
+                values[key] = int(txt)
+            elif kind == "choice":
+                picked = [value for value, b in w if b.isChecked()]
+                if picked:
+                    values[key] = picked[0]
+            elif kind == "background":
+                picked = [value for value, b in self._st_bg_buttons if b.isChecked()]
+                values[key] = picked[0] if picked else ""
+        try:
+            save_config_values(values)
+        except Exception as e:
+            LOG.error(f"[SETTINGS] save failed: {e}")
+            self.st_status.setText(f"Gagal simpan: {e}")
+            return
+        # Most settings are read when used; refresh the ones kept on screen / in memory.
+        self._bg.set_image(cfg_get("ui.background_image", ""))
+        self._refresh_home_texts()
+        self.max_retakes_per_shot = int(cfg_get("max_retakes_per_shot", 2) or 0)
+        self.qris = make_qris_client()
+        self._reset_to_home()
+        self._show_popup(self.stack.widget(self.SCREEN_HOME), "Tersimpan",
+                         "Setting baru langsung dipakai mulai sesi berikutnya.")
+
+    def _admin_menu(self):
+        """Choice after the admin password: open settings or quit the app."""
+        host = self.centralWidget()
+        dim = QWidget(host)
+        dim.setAttribute(Qt.WA_StyledBackground, True)
+        dim.setStyleSheet("background: rgba(40, 20, 50, 170);")
+        dim.setGeometry(0, 0, host.width(), host.height())
+        box = QWidget(dim)
+        box.setAttribute(Qt.WA_StyledBackground, True)
+        box.setStyleSheet(f"background: white; border: 4px solid {COLORS['pink']}; border-radius: 32px;")
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(48, 36, 48, 36)
+        lay.setSpacing(18)
+        title = QLabel("Menu Admin")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 36px; font-weight: 800; "
+                            f"font-family: '{FONT_DISPLAY}'; border: none;")
+        lay.addWidget(title)
+        at_home = self.stack.currentIndex() == self.SCREEN_HOME
+
+        def close_overlay():
+            if self._exit_overlay is dim:
+                self._exit_overlay = None
+            dim.deleteLater()
+
+        def open_settings():
+            close_overlay()
+            self._open_settings()
+
+        def quit_app():
+            LOG.info("[ADMIN] exit by operator")
+            close_overlay()
+            self.close()
+
+        for text, fn, primary, enabled in (
+                ("\u2699  Buka Setting", open_settings, True, at_home),
+                ("Keluar Aplikasi", quit_app, False, True),
+                ("Batal", close_overlay, False, True)):
+            b = QPushButton(text)
+            b.setFixedSize(420, 72)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setEnabled(enabled)
+            b.setStyleSheet(
+                f"QPushButton {{ background: {COLORS['pink'] if primary else 'white'}; "
+                f"color: {'white' if primary else COLORS['ink']}; border: 2px solid {COLORS['pink']}; "
+                f"border-radius: 36px; font-size: 24px; font-weight: 900; }}"
+                f"QPushButton:disabled {{ background: {COLORS['pink_soft']}; color: white; }}")
+            b.clicked.connect(fn)
+            lay.addWidget(b, 0, Qt.AlignHCenter)
+        if not at_home:
+            note = QLabel("Setting hanya bisa dibuka dari halaman awal")
+            note.setAlignment(Qt.AlignCenter)
+            note.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; font-weight: 600; border: none;")
+            lay.addWidget(note)
+        bw = min(640, host.width() - 60)
+        box.setFixedWidth(bw)
+        bh = lay.totalHeightForWidth(bw)
+        if bh <= 0:
+            bh = lay.sizeHint().height()
+        box.setFixedHeight(min(host.height() - 40, bh))
+        box.move((host.width() - bw) // 2, max(20, (host.height() - box.height()) // 2))
+        self._exit_overlay = dim
+        dim.show()
+        dim.raise_()
         QTimer.singleShot(30000, lambda: self._exit_overlay is dim and close_overlay())
 
     def keyPressEvent(self, event):
