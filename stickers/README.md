@@ -107,7 +107,13 @@ Coba juga foto **ramai-ramai** dan foto **kepala miring**, biar yakin.
 
 1. Salin PNG + `stickers.json` yang baru ke folder `stickers` di sebelah `NeoPhoto.exe`.
 2. **Tutup dan buka lagi aplikasinya** (daftar sticker dibaca sekali saat app dibuka).
-3. Sticker baru muncul di kolom STICKER (layar kamera) dan panel STICKER (layar pilih frame).
+3. Sticker baru muncul di kolom STICKER (layar kamera, nempel di wajah) dan panel TAMBAH STICKER
+   (layar pilih frame: tiap PNG bisa ditambah ke mana saja di frame, digeser, dibesar/kecilkan, diputar).
+
+Sticker wajah ikut ke tiap foto sesuai yang dipilih waktu foto itu diambil, dan tidak bisa diganti
+setelahnya. Di layar pilih frame tamu hanya bisa **menambah** sticker. Setting admin
+"Sticker di soft file" menentukan apakah foto yang disimpan & di-upload ikut ber-sticker (hasil
+cetak selalu ber-sticker).
 
 ## Kalau ada masalah
 

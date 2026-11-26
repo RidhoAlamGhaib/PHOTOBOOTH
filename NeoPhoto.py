@@ -15,6 +15,7 @@ import sys
 import time
 import datetime
 import platform
+import math
 import random
 import zipfile
 import json
@@ -45,7 +46,7 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import (QPixmap, QImage, QIcon, QFont, QPainter, QColor,
                          QLinearGradient, QRadialGradient, QBrush, QFontDatabase,
-                         QRegExpValidator)
+                         QRegExpValidator, QPen)
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 # --- CONFIG ---
@@ -304,16 +305,19 @@ _FALLBACK_DEFAULTS = {
         # a paid session starts by itself after this many seconds.
         "ready_seconds": 60,
     },
-    # Face stickers (stickers/ folder): live on the camera screen, changeable on the
-    # frame screen; video = also on the behind-the-scene / moving-picture videos.
+    # Face stickers (stickers/ folder): picked on the live view, kept per photo;
+    # on the frame screen guests add extra stickers anywhere on the print.
+    # video = also on the behind-the-scene / moving-picture videos; soft_file =
+    # the saved / uploaded photos have them too (the print always has them).
     "stickers": {
         "enabled": True,
         "live": True,
         "video": True,
+        "soft_file": True,
     },
     # Beauty camera (beauty.py, needs MediaPipe): smoother skin, ring-light glow,
-    # brighter eyes / teeth, light contouring. intensity 0..1. Guests can switch it
-    # off on the live view before shooting; live = also on the live view.
+    # brighter eyes / teeth, light contouring. intensity 0..1. Only set here / in
+    # the admin settings; live = also on the live view.
     "beauty": {
         "enabled": True,
         "intensity": 0.6,
@@ -511,6 +515,7 @@ SETTINGS_SPEC = [
         ("stickers.enabled", "Sticker wajah", "choice", _YES_NO),
         ("stickers.live", "Sticker live di kamera", "choice", _YES_NO),
         ("stickers.video", "Sticker di video BTS & moving", "choice", _YES_NO),
+        ("stickers.soft_file", "Sticker di soft file (foto yang disimpan & di-upload)", "choice", _YES_NO),
     ]),
     ("Cetak & upload", [
         ("printing.enabled", "Cetak foto", "choice", _YES_NO),
@@ -2034,6 +2039,11 @@ def clamp_adjust(img_shape, target_w, target_h, adj):
         cw, ch = float(w), w / ar
     hw, hh = cw / zoom / 2.0 / w, ch / zoom / 2.0 / h
     return (zoom, min(max(cx, hw), 1.0 - hw), min(max(cy, hh), 1.0 - hh))
+
+
+def _sticker_soft_file():
+    """Saved / uploaded photos keep the stickers (stickers.soft_file)."""
+    return bool((CONFIG.get("stickers", {}) or {}).get("soft_file", True))
 
 
 def _stickers_on(what="enabled"):
@@ -3861,19 +3871,6 @@ class MainWindow(QMainWindow):
                            font-size: 22px; font-weight: 800; }}""")
         self.btn_ready_cancel.clicked.connect(self._ready_cancel)
         rrow.addWidget(self.btn_ready_cancel)
-        self.btn_beauty = QPushButton("Beauty ON")
-        self.btn_beauty.setCheckable(True)
-        self.btn_beauty.setFixedSize(200, 72)
-        self.btn_beauty.setCursor(Qt.PointingHandCursor)
-        self.btn_beauty.setFocusPolicy(Qt.NoFocus)
-        self.btn_beauty.setStyleSheet(f"""
-            QPushButton {{ background: {COLORS['card']}; color: {COLORS['ink_soft']};
-                           border: 1px solid {COLORS['border']}; border-radius: 6px;
-                           font-size: 22px; font-weight: 800; }}
-            QPushButton:checked {{ background: {COLORS['pink_soft']}; color: {COLORS['pink_dk']};
-                                   border: 2px solid {COLORS['pink']}; }}""")
-        self.btn_beauty.clicked.connect(self._toggle_beauty)
-        rrow.addWidget(self.btn_beauty)
         self.btn_ready_start = QPushButton("MULAI FOTO")
         self.btn_ready_start.setFixedSize(360, 72)
         self.btn_ready_start.setCursor(Qt.PointingHandCursor)
@@ -4181,17 +4178,46 @@ class MainWindow(QMainWindow):
         sb = QGridLayout(self.fp_sticker_box)
         sb.setContentsMargins(0, 14, 0, 0)
         sb.setSpacing(8)
-        st_title = QLabel("STICKER")
-        st_title.setStyleSheet("color: #7A6488; font-size: 18px; font-weight: 800; letter-spacing: 4px; "
-                               "background: transparent; padding: 4px 4px 8px 4px;")
+        st_title = QLabel("TAMBAH STICKER")
+        st_title.setStyleSheet("color: #7A6488; font-size: 18px; font-weight: 800; letter-spacing: 3px; "
+                               "background: transparent; padding: 4px 4px 0px 4px;")
         sb.addWidget(st_title, 0, 0, 1, 3)
+        st_hint = QLabel("Ketuk untuk menambah, geser di frame")
+        st_hint.setWordWrap(True)
+        st_hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 13px; font-weight: 600; "
+                              f"background: transparent; padding: 0px 4px 6px 4px;")
+        sb.addWidget(st_hint, 1, 0, 1, 3)
         fp_col = QVBoxLayout()
         fp_col.setContentsMargins(0, 0, 0, 0)
         fp_col.setSpacing(8)
-        sb.addLayout(fp_col, 1, 0, 1, 3)
-        self._fp_picker = self._sticker_picker(self.fp_sticker_box, fp_col, icon=40, btn_w=80,
-                                               btn_h=76, cols=3, scroll=False)
-        self._fp_sticker_btns = self._fp_picker["btns"]
+        sb.addLayout(fp_col, 2, 0, 1, 3)
+        # Tools for the sticker selected on the preview.
+        tools = QWidget()
+        tools.setStyleSheet("background: transparent;")
+        tl = QHBoxLayout(tools)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(6)
+        self._deco_tool_btns = []
+        for text, fn in (("\u2212", partial(self._deco_scale, 1 / 1.2)), ("+", partial(self._deco_scale, 1.2)),
+                         ("Putar", self._deco_rotate), ("Hapus", self._deco_delete)):
+            b = QPushButton(text)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedHeight(44)
+            b.setMinimumWidth(10)
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            b.setStyleSheet(f"""
+                QPushButton {{ background: {COLORS['card']}; color: {COLORS['ink']};
+                               border: 1px solid {COLORS['border']}; border-radius: 6px;
+                               font-size: {22 if len(text) == 1 else 14}px; font-weight: 800; }}
+                QPushButton:disabled {{ color: {COLORS['border']}; }}""")
+            b.clicked.connect(fn)
+            tl.addWidget(b, 1)
+            self._deco_tool_btns.append(b)
+        fp_col.addWidget(tools)
+        self._deco_picker = self._sticker_picker(self.fp_sticker_box, fp_col, icon=50, btn_w=80,
+                                                 btn_h=72, cols=3, scroll=False, items=self._deco_items(),
+                                                 on_pick=self._add_deco, none_label=None, checkable=False)
         sb.setContentsMargins(0, 0, 0, 14)
         self.filter_panel_layout.insertWidget(0, self.fp_sticker_box)   # stickers first, then filters
         self.fp_sticker_box.setVisible(_stickers_on())
@@ -4977,6 +5003,10 @@ class MainWindow(QMainWindow):
                         QTimer.singleShot(0, self._ask_exit)
                 else:
                     self._corner_taps = []
+        if (obj is getattr(self, "fp_preview", None)
+                and event.type() in (QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease)
+                and self._fp_deco_event(event)):
+            return True                              # an added sticker took it
         if (event.type() == QEvent.MouseButtonRelease and obj is getattr(self, "fp_preview", None)
                 and _full_frame()):
             self._fp_preview_tapped(event.pos())
@@ -5939,7 +5969,7 @@ class MainWindow(QMainWindow):
     def _fp_thumb(self, shot_key, frame, w, h):
         flt = getattr(self, "current_filter", "none")
         adj = (getattr(self, "_adjust", None) or {}).get(shot_key)
-        key = (shot_key, flt, w, h, adj, getattr(self, "sticker_id", ""),
+        key = (shot_key, flt, w, h, adj, self._sticker_of(frame),
                bool(getattr(self, "beauty_on", False)))
         frame = self._with_sticker(frame)
         pix = self._fp_thumb_cache.get(key)
@@ -6007,7 +6037,7 @@ class MainWindow(QMainWindow):
 
     def _render_fp_preview(self):
         try:
-            canvas = self._build_final_canvas()
+            canvas = self._build_final_canvas(with_decos=False)   # added stickers: painted below
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Gagal render: {e}")
             return
@@ -6032,7 +6062,151 @@ class MainWindow(QMainWindow):
         data = rgb.tobytes("raw", "RGB")
         qimg = QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format_RGB888)
         pix = QPixmap.fromImage(qimg).scaled(new_w, new_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.fp_preview.setPixmap(pix)
+        self._fp_base_pix = pix
+        self._paint_fp_preview()
+
+    # ---- stickers added on the frame screen ("decos") --------------------
+    # self.decos: [{"file", "x", "y", "w", "rot"}], x / y = centre as a share of
+    # the print's width / height, w = width as a share of the print's width.
+
+    def _deco_pixmap(self, file, width):
+        """The sticker picture, width px wide (0 = as stored). Cached."""
+        cache = self.__dict__.setdefault("_deco_pm_cache", {})
+        key = (file, int(width))
+        pm = cache.get(key)
+        if pm is None:
+            full = cache.get((file, 0))
+            if full is None:
+                full = QPixmap(stickers.file_path(file))
+                cache[(file, 0)] = full
+            if full.isNull() or int(width) <= 0:
+                return full
+            if len(cache) > 80:
+                cache.clear()
+                cache[(file, 0)] = full
+            pm = full.scaledToWidth(max(2, int(width)), Qt.SmoothTransformation)
+            cache[key] = pm
+        return pm
+
+    def _deco_geom(self, d, pw, ph):
+        """(centre x, centre y, width, height) of a deco on a pw x ph preview."""
+        pm = self._deco_pixmap(d["file"], 0)
+        ratio = pm.height() / float(max(1, pm.width())) if not pm.isNull() else 1.0
+        w = d["w"] * pw
+        return d["x"] * pw, d["y"] * ph, w, w * ratio
+
+    def _paint_fp_preview(self):
+        base = getattr(self, "_fp_base_pix", None)
+        if base is None or base.isNull():
+            return
+        pm = QPixmap(base)
+        decos = getattr(self, "decos", []) or []
+        sel = getattr(self, "_deco_sel", -1)
+        if decos:
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            for i, d in enumerate(decos):
+                cx, cy, w, h = self._deco_geom(d, pm.width(), pm.height())
+                p.save()
+                p.translate(cx, cy)
+                p.rotate(d.get("rot", 0))
+                p.drawPixmap(int(-w / 2), int(-h / 2), self._deco_pixmap(d["file"], w))
+                if i == sel:
+                    pen = QPen(QColor(COLORS["pink"]), 3, Qt.DashLine)
+                    p.setPen(pen)
+                    p.setBrush(Qt.NoBrush)
+                    p.drawRect(int(-w / 2) - 4, int(-h / 2) - 4, int(w) + 8, int(h) + 8)
+                p.restore()
+            p.end()
+        self.fp_preview.setPixmap(pm)
+        for b in getattr(self, "_deco_tool_btns", []):
+            b.setEnabled(0 <= sel < len(decos))
+
+    def _deco_hit(self, pos):
+        """Index of the top deco under a point on the preview, or -1."""
+        pix = self.fp_preview.pixmap()
+        if pix is None or pix.isNull():
+            return -1
+        ox = (self.fp_preview.width() - pix.width()) / 2.0
+        oy = (self.fp_preview.height() - pix.height()) / 2.0
+        px, py = pos.x() - ox, pos.y() - oy
+        decos = getattr(self, "decos", []) or []
+        for i in range(len(decos) - 1, -1, -1):
+            cx, cy, w, h = self._deco_geom(decos[i], pix.width(), pix.height())
+            a = -math.radians(decos[i].get("rot", 0))
+            dx, dy = px - cx, py - cy
+            lx, ly = dx * math.cos(a) - dy * math.sin(a), dx * math.sin(a) + dy * math.cos(a)
+            pad = 10                                           # a little easier to grab
+            if abs(lx) <= w / 2 + pad and abs(ly) <= h / 2 + pad:
+                return i
+        return -1
+
+    def _fp_deco_event(self, event):
+        """Press / drag / release on the frame preview. True = handled here (no
+        photo tap)."""
+        et = event.type()
+        decos = self.__dict__.setdefault("decos", [])
+        pix = self.fp_preview.pixmap()
+        if et == QEvent.MouseButtonPress:
+            i = self._deco_hit(event.pos())
+            if i >= 0:
+                # Bring to front, remember where it was grabbed.
+                decos.append(decos.pop(i))
+                self._deco_sel = len(decos) - 1
+                d = decos[-1]
+                pw, ph = max(1, pix.width()), max(1, pix.height())
+                self._deco_drag = (event.pos(), d["x"], d["y"], pw, ph)
+                self._paint_fp_preview()
+                return True
+            if getattr(self, "_deco_sel", -1) >= 0:
+                self._deco_sel = -1                      # tap outside: just unselect
+                self._deco_swallow = True
+                self._paint_fp_preview()
+                return True
+            return False
+        if et == QEvent.MouseMove and getattr(self, "_deco_drag", None):
+            start, x0, y0, pw, ph = self._deco_drag
+            d = decos[self._deco_sel]
+            d["x"] = min(1.0, max(0.0, x0 + (event.pos().x() - start.x()) / float(pw)))
+            d["y"] = min(1.0, max(0.0, y0 + (event.pos().y() - start.y()) / float(ph)))
+            self._paint_fp_preview()
+            return True
+        if et == QEvent.MouseButtonRelease:
+            if getattr(self, "_deco_drag", None) or getattr(self, "_deco_swallow", False):
+                self._deco_drag = None
+                self._deco_swallow = False
+                return True
+        return False
+
+    def _add_deco(self, file):
+        decos = self.__dict__.setdefault("decos", [])
+        if len(decos) >= 15:
+            return
+        k = len(decos)
+        decos.append({"file": file, "x": 0.5 + ((k % 3) - 1) * 0.12,
+                      "y": 0.45 + (((k // 3) % 3) - 1) * 0.1, "w": 0.24, "rot": 0})
+        self._deco_sel = len(decos) - 1
+        LOG.info(f"[DECO] + {file}")
+        self._paint_fp_preview()
+
+    def _deco_scale(self, k):
+        if 0 <= getattr(self, "_deco_sel", -1) < len(self.decos):
+            d = self.decos[self._deco_sel]
+            d["w"] = min(1.2, max(0.06, d["w"] * k))
+            self._paint_fp_preview()
+
+    def _deco_rotate(self):
+        if 0 <= getattr(self, "_deco_sel", -1) < len(self.decos):
+            d = self.decos[self._deco_sel]
+            d["rot"] = (d.get("rot", 0) + 15) % 360
+            self._paint_fp_preview()
+
+    def _deco_delete(self):
+        if 0 <= getattr(self, "_deco_sel", -1) < len(self.decos):
+            self.decos.pop(self._deco_sel)
+            self._deco_sel = -1
+            self._paint_fp_preview()
 
     def _fit_fp_layout(self):
         if not hasattr(self, "frames_screen") or self.frames_screen is None:
@@ -6178,8 +6352,11 @@ class MainWindow(QMainWindow):
         self.camera.crop = not _full_frame()
         self._adjust = {}                # photo key -> (zoom, cx, cy) from the frame screen
         self.sticker_id = ""             # face sticker of this session ("" = none)
-        self.beauty_on = _beauty_on()    # guests can switch it off on the live view
+        self.beauty_on = _beauty_on()    # admin setting only
         self._stk_cache = {}
+        self._shot_sticker = {}          # id(photo) -> (photo, sticker id it was taken with)
+        self.decos = []                  # stickers added on the frame screen
+        self._deco_sel = -1
         self._bty_cache = {}
         self._face_cache = {}
         self._stk_tracker = stickers.LiveTracker(every=2)
@@ -6224,9 +6401,6 @@ class MainWindow(QMainWindow):
         self.btn_ready_start.setEnabled(True)
         self.btn_ready_start.setText("MULAI FOTO")
         self.btn_ready_cancel.setVisible(bool(coupon))
-        self.btn_beauty.setVisible(_beauty_on())
-        self.btn_beauty.setChecked(bool(getattr(self, "beauty_on", False)))
-        self.btn_beauty.setText("Beauty ON" if self.btn_beauty.isChecked() else "Beauty OFF")
         self.ready_banner.hide()
         self.countdown_label.hide()
         self.ready_panel.show()
@@ -6255,11 +6429,6 @@ class MainWindow(QMainWindow):
         m, s_ = divmod(max(0, self._ready_left), 60)
         self.ready_timer_lbl.setText(f"Tekan MULAI dalam {m:02d}:{s_:02d}" if coupon
                                      else f"Mulai otomatis dalam {m:02d}:{s_:02d}")
-
-    def _toggle_beauty(self):
-        self.beauty_on = self.btn_beauty.isChecked()
-        self.btn_beauty.setText("Beauty ON" if self.beauty_on else "Beauty OFF")
-        LOG.info(f"[BEAUTY] {'on' if self.beauty_on else 'off'} (guest)")
 
     def _ready_cancel(self):
         LOG.info(f"[COUPON] {(getattr(self, '_coupon', None) or {}).get('code')}: cancelled, code stays unused")
@@ -6500,6 +6669,9 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 LOG.warning(f"[COLOR] skin tone fix failed: {e}")
         self.current_frame_data = frame
+        # The face sticker shown while this photo was taken stays with it.
+        sid = getattr(self, "sticker_id", "") if _stickers_on() else ""
+        self.__dict__.setdefault("_shot_sticker", {})[id(frame)] = (frame, sid)
         self.is_reviewing = True
         self._show_review_pixmap()
         remaining = self.max_retakes_per_shot - self.retakes_used
@@ -7174,7 +7346,11 @@ class MainWindow(QMainWindow):
                 out = left + right
         return out
 
-    def _build_final_canvas(self):
+    def _build_final_canvas(self, with_stickers=True, with_decos=True):
+        """The print: photos in the frame. with_stickers=False leaves out the face
+        stickers and the added stickers (soft file without stickers);
+        with_decos=False leaves out only the added ones (the frame screen draws
+        those itself so they can be dragged)."""
         if not self.overlay_path:
             return None
         overlay = Image.open(self.overlay_path).convert("RGBA")
@@ -7213,7 +7389,7 @@ class MainWindow(QMainWindow):
             for (rect, pose_idx), mask in zip(slot_pose_pairs, masks):
                 x, y, cw, ch = rect
                 if cw < 1 or ch < 1: continue
-                f = self._with_sticker(self.captured_frames[pose_idx])
+                f = self._with_sticker(self.captured_frames[pose_idx], with_stickers)
                 adj = self._adjust_for(pose_idx)
                 if adj is not None:
                     # Placed by the guest on the frame screen.
@@ -7241,7 +7417,7 @@ class MainWindow(QMainWindow):
             for (rect, pose_idx) in slot_pose_pairs:
                 x, y, cw, ch = rect
                 if cw < 1 or ch < 1: continue
-                f = self._with_sticker(self.captured_frames[pose_idx])
+                f = self._with_sticker(self.captured_frames[pose_idx], with_stickers)
                 adj = self._adjust_for(pose_idx)
                 if adj is not None:
                     img_bgr = crop_adjusted(f, int(cw), int(ch), adj)
@@ -7250,7 +7426,27 @@ class MainWindow(QMainWindow):
                 img_bgr = apply_filter(img_bgr, flt)
                 img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
                 canvas.paste(img, (x, y))
+        if with_stickers and with_decos:
+            self._paste_decos(canvas)
         return canvas
+
+    def _paste_decos(self, canvas):
+        """Stickers added on the frame screen, on top of everything (PIL)."""
+        ow, oh = canvas.size
+        for d in list(getattr(self, "decos", []) or []):
+            try:
+                im = Image.open(stickers.file_path(d["file"])).convert("RGBA")
+                tw = max(2, int(round(d["w"] * ow)))
+                th = max(2, int(round(tw * im.height / float(im.width))))
+                im = im.resize((tw, th), Image.LANCZOS)
+                if d.get("rot"):
+                    im = im.rotate(-d["rot"], resample=Image.BICUBIC, expand=True)
+                layer = Image.new("RGBA", (ow, oh), (0, 0, 0, 0))
+                layer.paste(im, (int(round(d["x"] * ow - im.width / 2.0)),
+                                 int(round(d["y"] * oh - im.height / 2.0))))   # may stick out: clipped
+                canvas.alpha_composite(layer)
+            except Exception as e:
+                LOG.warning(f"[DECO] {d.get('file')}: {e}")
 
     def _retouched(self, frame, retouch):
         """The photo at <= RETOUCH_MAX_SIDE px with the beauty retouch (cached per
@@ -7271,11 +7467,16 @@ class MainWindow(QMainWindow):
         cache[key] = (frame, img)
         return img
 
-    def _with_sticker(self, frame):
-        """The photo as the guest chose it: beauty retouch, then the face sticker.
+    def _sticker_of(self, frame):
+        """Face sticker the photo was taken with ("" = none)."""
+        hit = (getattr(self, "_shot_sticker", None) or {}).get(id(frame))
+        return hit[1] if hit is not None and hit[0] is frame else ""
+
+    def _with_sticker(self, frame, with_stickers=True):
+        """The photo as the guest took it: beauty retouch, then its face sticker.
         A copy of at most RETOUCH_MAX_SIDE px (plenty for the print holes); the
-        stored photo stays untouched. Cached per photo for the current sticker."""
-        sid = getattr(self, "sticker_id", "") if _stickers_on() else ""
+        stored photo stays untouched. Cached per photo."""
+        sid = self._sticker_of(frame) if (with_stickers and _stickers_on()) else ""
         retouch = _beauty_level() if (getattr(self, "beauty_on", False) and _beauty_on()) else 0.0
         if (not sid and retouch <= 0) or frame is None:
             return frame
@@ -7286,8 +7487,8 @@ class MainWindow(QMainWindow):
         key = (id(frame), sid, retouch)
         hit = cache.get(key)
         if hit is None or hit[0] is not frame:
-            for k in [k for k in cache if k[1] != sid or k[2] != retouch]:
-                del cache[k]                       # keep only the sticker on screen
+            if len(cache) >= 24:
+                cache.pop(next(iter(cache)))
             fcache = self.__dict__.setdefault("_face_cache", {})
             fhit = fcache.get(id(frame))
             if fhit is None or fhit[0] is not base:
@@ -7301,21 +7502,41 @@ class MainWindow(QMainWindow):
             cache[key] = hit
         return hit[1]
 
-    def _sticker_buttons(self, parent, icon, on_pick):
-        """Buttons for "no sticker" + every sticker: [(sticker_id, button)]."""
+    @staticmethod
+    def _face_sticker_items():
+        """Face stickers for the live-view picker: [{id, label, file, category}]."""
+        return [{"id": st["id"], "label": st["label"], "file": st["parts"][0]["file"],
+                 "category": st.get("category") or "Lainnya"} for st in stickers.catalog()]
+
+    @staticmethod
+    def _deco_items():
+        """Every sticker picture once, for adding anywhere on the print."""
+        out, seen = [], set()
+        for st in stickers.catalog():
+            for p in st["parts"]:
+                if p["file"] not in seen:
+                    seen.add(p["file"])
+                    out.append({"id": p["file"], "label": "", "file": p["file"],
+                                "category": st.get("category") or "Lainnya"})
+        return out
+
+    def _sticker_buttons(self, parent, icon, on_pick, items=None, none_label="Tanpa", checkable=True):
+        """Buttons for "no sticker" (none_label) + every item: [(id, button)]."""
         out = []
-        for sid, label, files in [("", "Tanpa", [])] + [
-                (st["id"], st["label"], [p["file"] for p in st["parts"]]) for st in stickers.catalog()]:
+        items = self._face_sticker_items() if items is None else items
+        rows = ([("", none_label, None)] if none_label else []) + [
+            (it["id"], it["label"], it["file"]) for it in items]
+        for sid, label, file in rows:
             b = QToolButton(parent)
-            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            b.setCheckable(True)
-            b.setAutoExclusive(True)
+            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon if label else Qt.ToolButtonIconOnly)
+            b.setCheckable(checkable)
+            b.setAutoExclusive(checkable)
             b.setFocusPolicy(Qt.NoFocus)
             b.setCursor(Qt.PointingHandCursor)
             b.setText(label)
             b.setFixedSize(icon + 30, icon + 40)
-            if files:
-                pm = QPixmap(stickers.file_path(files[0]))
+            if file:
+                pm = QPixmap(stickers.file_path(file))
                 if not pm.isNull():
                     b.setIcon(QIcon(pm.scaled(icon, icon, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
                     b.setIconSize(QSize(icon, icon))
@@ -7328,17 +7549,23 @@ class MainWindow(QMainWindow):
             out.append((sid, b))
         return out
 
-    def _sticker_picker(self, parent, col_layout, icon, btn_w, btn_h, cols, scroll):
+    def _sticker_picker(self, parent, col_layout, icon, btn_w, btn_h, cols, scroll,
+                        items=None, on_pick=None, none_label="Tanpa", checkable=True):
         """Category tabs + a grid of sticker buttons (one category at a time).
         Adds itself to col_layout; returns the picker dict."""
-        btns = self._sticker_buttons(parent, icon, self._pick_sticker)
+        items = self._face_sticker_items() if items is None else items
+        btns = self._sticker_buttons(parent, icon, on_pick or self._pick_sticker, items,
+                                     none_label, checkable)
         for _, b in btns:
             b.setFixedSize(btn_w, btn_h)
             if btn_w < 90:
                 b.setStyleSheet(b.styleSheet().replace("font-size: 14px", "font-size: 12px"))
-        cats = stickers.categories()
+        cats = []
+        for it in items:
+            if it["category"] not in cats:
+                cats.append(it["category"])
         picker = {"btns": btns, "cols": cols, "cat": cats[0] if cats else "", "chips": {},
-                  "cat_of": {st["id"]: st.get("category") or "Lainnya" for st in stickers.catalog()}}
+                  "cat_of": {it["id"]: it["category"] for it in items}}
         if len(cats) > 1:
             chips = QWidget(parent)
             chips.setStyleSheet("background: transparent;")
@@ -7411,19 +7638,14 @@ class MainWindow(QMainWindow):
     def _pick_sticker(self, sid):
         self.sticker_id = sid
         LOG.info(f"[STICKER] {sid or 'none'}")
-        self._sync_sticker_buttons()
-        if self.stack.currentIndex() == self.SCREEN_FRAMES:
-            self._populate_fp_slots()
-            self._render_fp_preview()
-        elif self.is_reviewing and self.current_frame_data is not None:
-            self._show_review_pixmap()
+        self._sync_sticker_buttons()       # photos already taken keep their own sticker
 
     def _sync_sticker_buttons(self):
         sid = getattr(self, "sticker_id", "")
-        for picker in (getattr(self, "_cap_picker", None), getattr(self, "_fp_picker", None)):
+        for picker in (getattr(self, "_cap_picker", None),):
             if picker and sid and picker["chips"] and picker["cat_of"].get(sid, picker["cat"]) != picker["cat"]:
                 self._show_sticker_cat(picker, picker["cat_of"][sid])   # show the picked one
-        for group in (getattr(self, "_cap_sticker_btns", []), getattr(self, "_fp_sticker_btns", [])):
+        for group in (getattr(self, "_cap_sticker_btns", []),):
             for s_id, b in group:
                 b.setChecked(s_id == sid)
         bar = getattr(self, "cap_sticker_bar", None)
@@ -7566,6 +7788,11 @@ class MainWindow(QMainWindow):
         """
         try:
             self.temp_canvas = self._build_final_canvas()
+            # Saved / uploaded copy without stickers when the admin says so.
+            self._soft_canvas = None
+            if not _sticker_soft_file() and (self.decos or any(
+                    self._sticker_of(f) for f in (self.captured_frames or []))):
+                self._soft_canvas = self._build_final_canvas(with_stickers=False)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Gagal komposit: {e}")
             self._reset_to_home()
@@ -7602,6 +7829,7 @@ class MainWindow(QMainWindow):
         self._pending_frame_n = self.shots_per_session
         self._pending_filter = getattr(self, "current_filter", "none")
         self._pending_sticker = getattr(self, "sticker_id", "") if _stickers_on() else ""
+        self._pending_shot_stickers = [self._sticker_of(f) for f in self._pending_all_shots]
         self._pending_beauty = bool(getattr(self, "beauty_on", False)) and _beauty_on()
         self._pending_indiv_fx = self.chk_indiv_fx.isChecked()
         coupon = getattr(self, "_coupon", None)
@@ -7732,11 +7960,14 @@ class MainWindow(QMainWindow):
         #   since there's no printout to carry it.
         try:
             png_path = SAVE_DIR / f"FINAL_{ts}.png"
+            soft = getattr(self, "_soft_canvas", None) or self.temp_canvas
+            if soft is not self.temp_canvas:
+                LOG.info("[SAVE] soft file without stickers (stickers.soft_file off)")
             if print_enabled:
-                self.temp_canvas.convert("RGB").save(png_path)
+                soft.convert("RGB").save(png_path)
                 LOG.info(f"[SAVE] clean PNG: {png_path}")
             else:
-                stamped = stamp_password_on_image(self.temp_canvas, password, qr_url=folder_url)
+                stamped = stamp_password_on_image(soft, password, qr_url=folder_url)
                 stamped.convert("RGB").save(png_path)
                 LOG.info(f"[SAVE] stamped PNG (print disabled): {png_path}")
             self._final_png_path = png_path
@@ -7769,7 +8000,9 @@ class MainWindow(QMainWindow):
         # Customer's checkbox on the frame screen (default: config apply_filter).
         styled = bool(getattr(self, "_pending_indiv_fx", icfg.get("apply_filter", True)))
         flt = getattr(self, "_pending_filter", "none") if styled else "none"
-        sticker = getattr(self, "_pending_sticker", "") if styled else ""
+        shot_stickers = list(getattr(self, "_pending_shot_stickers", []) or [])
+        if not (styled and _sticker_soft_file()):
+            shot_stickers = []
         retouch = _beauty_level() if getattr(self, "_pending_beauty", False) else 0.0
         quality = int(icfg.get("jpeg_quality", 95))
         out_dir = SAVE_DIR / f"SESSION_{ts}"
@@ -7780,6 +8013,7 @@ class MainWindow(QMainWindow):
                 for i, frame in enumerate(shots):
                     try:
                         img = beauty.beautify(frame, retouch) if retouch > 0 else frame
+                        sticker = shot_stickers[i] if i < len(shot_stickers) else ""
                         img = stickers.draw(img, sticker) if sticker else img
                         img = apply_filter(img, flt)
                         name = f"foto_{i + 1:02d}"
