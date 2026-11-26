@@ -1,109 +1,815 @@
 {
-  "stickers": [
+ "stickers": [
+  {
+   "id": "pita",
+   "label": "Pita",
+   "category": "Cute",
+   "parts": [
     {
-      "id": "pita",
-      "label": "Pita",
-      "parts": [
-        {
-          "file": "bow.png",
-          "anchor": "head",
-          "width": 0.8,
-          "dy": -0.08
-        }
-      ]
-    },
-    {
-      "id": "kucing",
-      "label": "Kucing",
-      "parts": [
-        {
-          "file": "cat_ears.png",
-          "anchor": "head",
-          "width": 1.4,
-          "dy": 0.0
-        },
-        {
-          "file": "blush.png",
-          "anchor": "cheeks",
-          "width": 0.34
-        }
-      ]
-    },
-    {
-      "id": "kelinci",
-      "label": "Kelinci",
-      "parts": [
-        {
-          "file": "bunny_ears.png",
-          "anchor": "head",
-          "width": 0.95,
-          "dy": -0.35
-        }
-      ]
-    },
-    {
-      "id": "kacamata",
-      "label": "Kacamata",
-      "parts": [
-        {
-          "file": "heart_glasses.png",
-          "anchor": "eyes",
-          "width": 1.05,
-          "dy": 0.02
-        }
-      ]
-    },
-    {
-      "id": "blush",
-      "label": "Blush",
-      "parts": [
-        {
-          "file": "blush.png",
-          "anchor": "cheeks",
-          "width": 0.36
-        }
-      ]
-    },
-    {
-      "id": "tiara",
-      "label": "Tiara",
-      "parts": [
-        {
-          "file": "tiara.png",
-          "anchor": "head",
-          "width": 0.85,
-          "dy": 0.0
-        }
-      ]
-    },
-    {
-      "id": "love",
-      "label": "Love",
-      "parts": [
-        {
-          "file": "hearts.png",
-          "anchor": "head",
-          "width": 1.7,
-          "dy": -0.2
-        }
-      ]
-    },
-    {
-      "id": "pita_blush",
-      "label": "Pita + Blush",
-      "parts": [
-        {
-          "file": "bow.png",
-          "anchor": "head",
-          "width": 0.8,
-          "dy": -0.08
-        },
-        {
-          "file": "blush.png",
-          "anchor": "cheeks",
-          "width": 0.34
-        }
-      ]
+     "file": "bow.png",
+     "anchor": "head",
+     "width": 0.8,
+     "dy": -0.08
     }
-  ]
+   ]
+  },
+  {
+   "id": "pita_putih",
+   "label": "Putih",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "bow_white.png",
+     "anchor": "head",
+     "width": 0.8,
+     "dy": -0.08
+    }
+   ]
+  },
+  {
+   "id": "pita_merah",
+   "label": "Merah",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "bow_red.png",
+     "anchor": "head",
+     "width": 0.8,
+     "dy": -0.08
+    }
+   ]
+  },
+  {
+   "id": "pita_lilac",
+   "label": "Lilac",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "bow_lilac.png",
+     "anchor": "head",
+     "width": 0.8,
+     "dy": -0.08
+    }
+   ]
+  },
+  {
+   "id": "pita_kembar",
+   "label": "Pita Duo",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "bow.png",
+     "anchor": "head",
+     "width": 0.45,
+     "dy": 0.12,
+     "dx": -0.42,
+     "rot": -20
+    },
+    {
+     "file": "bow.png",
+     "anchor": "head",
+     "width": 0.45,
+     "dy": 0.12,
+     "dx": 0.42,
+     "rot": 20
+    }
+   ]
+  },
+  {
+   "id": "pita_blush",
+   "label": "Pita Pipi",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "bow.png",
+     "anchor": "head",
+     "width": 0.8,
+     "dy": -0.08
+    },
+    {
+     "file": "blush.png",
+     "anchor": "cheeks",
+     "width": 0.34
+    }
+   ]
+  },
+  {
+   "id": "blush",
+   "label": "Blush",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "blush.png",
+     "anchor": "cheeks",
+     "width": 0.36
+    }
+   ]
+  },
+  {
+   "id": "tiara",
+   "label": "Tiara",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "tiara.png",
+     "anchor": "head",
+     "width": 0.85,
+     "dy": -0.08
+    }
+   ]
+  },
+  {
+   "id": "bando_mutiara",
+   "label": "Mutiara",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "pearl_headband.png",
+     "anchor": "head",
+     "width": 1.15,
+     "dy": 0.12
+    }
+   ]
+  },
+  {
+   "id": "mahkota_bunga",
+   "label": "Flower",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "flower_crown.png",
+     "anchor": "head",
+     "width": 1.25,
+     "dy": 0.08
+    }
+   ]
+  },
+  {
+   "id": "kupu_kupu",
+   "label": "Kupu-kupu",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "butterflies.png",
+     "anchor": "head",
+     "width": 1.15,
+     "dy": -0.05
+    }
+   ]
+  },
+  {
+   "id": "sparkle",
+   "label": "Sparkle",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "sparkles.png",
+     "anchor": "head",
+     "width": 1.6,
+     "dy": -0.12
+    }
+   ]
+  },
+  {
+   "id": "ceri",
+   "label": "Ceri",
+   "category": "Cute",
+   "parts": [
+    {
+     "file": "cherries.png",
+     "anchor": "head",
+     "width": 0.36,
+     "dy": 0.1,
+     "dx": 0.4,
+     "rot": 15
+    }
+   ]
+  },
+  {
+   "id": "kucing",
+   "label": "Kucing",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "cat_ears.png",
+     "anchor": "head",
+     "width": 1.4
+    },
+    {
+     "file": "blush.png",
+     "anchor": "cheeks",
+     "width": 0.34
+    }
+   ]
+  },
+  {
+   "id": "kucing_kumis",
+   "label": "Meong",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "cat_ears.png",
+     "anchor": "head",
+     "width": 1.4
+    },
+    {
+     "file": "whiskers_dark.png",
+     "anchor": "nose",
+     "width": 1.1,
+     "dy": 0.02
+    }
+   ]
+  },
+  {
+   "id": "kelinci",
+   "label": "Kelinci",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "bunny_ears.png",
+     "anchor": "head",
+     "width": 0.95,
+     "dy": -0.35
+    }
+   ]
+  },
+  {
+   "id": "kelinci_hidung",
+   "label": "Bunny",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "bunny_ears.png",
+     "anchor": "head",
+     "width": 0.95,
+     "dy": -0.35
+    },
+    {
+     "file": "whiskers.png",
+     "anchor": "nose",
+     "width": 1.0,
+     "dy": 0.02
+    }
+   ]
+  },
+  {
+   "id": "anjing",
+   "label": "Anjing",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "dog_ears.png",
+     "anchor": "head",
+     "width": 1.5,
+     "dy": 0.32
+    },
+    {
+     "file": "dog_nose.png",
+     "anchor": "nose",
+     "width": 0.36
+    }
+   ]
+  },
+  {
+   "id": "beruang",
+   "label": "Beruang",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "bear_ears.png",
+     "anchor": "head",
+     "width": 1.2,
+     "dy": -0.15
+    },
+    {
+     "file": "blush.png",
+     "anchor": "cheeks",
+     "width": 0.34
+    }
+   ]
+  },
+  {
+   "id": "panda",
+   "label": "Panda",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "panda_ears.png",
+     "anchor": "head",
+     "width": 1.2,
+     "dy": -0.15
+    },
+    {
+     "file": "blush.png",
+     "anchor": "cheeks",
+     "width": 0.34
+    }
+   ]
+  },
+  {
+   "id": "rubah",
+   "label": "Rubah",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "fox_ears.png",
+     "anchor": "head",
+     "width": 1.35,
+     "dy": -0.12
+    },
+    {
+     "file": "whiskers_dark.png",
+     "anchor": "nose",
+     "width": 1.1,
+     "dy": 0.02
+    }
+   ]
+  },
+  {
+   "id": "tikus",
+   "label": "Tikus",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "mouse_ears.png",
+     "anchor": "head",
+     "width": 1.45,
+     "dy": -0.15
+    },
+    {
+     "file": "whiskers.png",
+     "anchor": "nose",
+     "width": 1.0,
+     "dy": 0.02
+    }
+   ]
+  },
+  {
+   "id": "babi",
+   "label": "Babi",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "pig_ears.png",
+     "anchor": "head",
+     "width": 1.3,
+     "dy": -0.08
+    },
+    {
+     "file": "pig_nose.png",
+     "anchor": "nose",
+     "width": 0.36,
+     "dy": 0.02
+    }
+   ]
+  },
+  {
+   "id": "rusa",
+   "label": "Rusa",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "antlers.png",
+     "anchor": "head",
+     "width": 1.6,
+     "dy": -0.25
+    },
+    {
+     "file": "red_nose.png",
+     "anchor": "nose",
+     "width": 0.2
+    }
+   ]
+  },
+  {
+   "id": "kodok",
+   "label": "Kodok",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "frog_eyes.png",
+     "anchor": "head",
+     "width": 1.0,
+     "dy": -0.15
+    },
+    {
+     "file": "blush.png",
+     "anchor": "cheeks",
+     "width": 0.34
+    }
+   ]
+  },
+  {
+   "id": "bebek",
+   "label": "Bebek",
+   "category": "Hewan",
+   "parts": [
+    {
+     "file": "duck_bill.png",
+     "anchor": "mouth",
+     "width": 0.7,
+     "dy": -0.04
+    }
+   ]
+  },
+  {
+   "id": "topi_pesta",
+   "label": "Ultah",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "party_hat.png",
+     "anchor": "head",
+     "width": 0.55,
+     "dy": -0.32,
+     "dx": 0.2,
+     "rot": 18
+    }
+   ]
+  },
+  {
+   "id": "mahkota",
+   "label": "Mahkota",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "king_crown.png",
+     "anchor": "head",
+     "width": 0.9,
+     "dy": -0.25
+    }
+   ]
+  },
+  {
+   "id": "malaikat",
+   "label": "Malaikat",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "halo.png",
+     "anchor": "head",
+     "width": 0.95,
+     "dy": -0.28
+    }
+   ]
+  },
+  {
+   "id": "setan",
+   "label": "Tanduk",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "devil_horns.png",
+     "anchor": "head",
+     "width": 1.15,
+     "dy": -0.1
+    }
+   ]
+  },
+  {
+   "id": "kacamata_pixel",
+   "label": "Pixel",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "pixel_glasses.png",
+     "anchor": "eyes",
+     "width": 1.1,
+     "dy": 0.04,
+     "dx": -0.03
+    }
+   ]
+  },
+  {
+   "id": "kacamata_bintang",
+   "label": "Star",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "star_glasses.png",
+     "anchor": "eyes",
+     "width": 1.12
+    }
+   ]
+  },
+  {
+   "id": "kacamata_bulat",
+   "label": "Retro",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "round_glasses.png",
+     "anchor": "eyes",
+     "width": 1.1,
+     "dy": 0.01
+    }
+   ]
+  },
+  {
+   "id": "kumis",
+   "label": "Kumis",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "mustache.png",
+     "anchor": "mouth",
+     "width": 0.6,
+     "dy": -0.1
+    }
+   ]
+  },
+  {
+   "id": "lidah",
+   "label": "Melet",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "tongue.png",
+     "anchor": "mouth",
+     "width": 0.28,
+     "dy": 0.12
+    }
+   ]
+  },
+  {
+   "id": "konfeti",
+   "label": "Konfeti",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "confetti.png",
+     "anchor": "head",
+     "width": 1.8,
+     "dy": -0.1
+    }
+   ]
+  },
+  {
+   "id": "wisuda",
+   "label": "Wisuda",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "grad_cap.png",
+     "anchor": "head",
+     "width": 1.2,
+     "dy": -0.32,
+     "rot": -6
+    }
+   ]
+  },
+  {
+   "id": "santa",
+   "label": "Santa",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "santa_hat.png",
+     "anchor": "head",
+     "width": 1.3,
+     "dy": -0.3,
+     "dx": 0.05
+    }
+   ]
+  },
+  {
+   "id": "beret",
+   "label": "Beret",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "beret.png",
+     "anchor": "head",
+     "width": 1.1,
+     "dy": -0.22,
+     "dx": 0.08,
+     "rot": -10
+    }
+   ]
+  },
+  {
+   "id": "koboi",
+   "label": "Koboi",
+   "category": "Pesta",
+   "parts": [
+    {
+     "file": "cowboy_hat.png",
+     "anchor": "head",
+     "width": 1.5,
+     "dy": -0.3
+    }
+   ]
+  },
+  {
+   "id": "love",
+   "label": "Love",
+   "category": "Love",
+   "parts": [
+    {
+     "file": "hearts.png",
+     "anchor": "head",
+     "width": 1.7,
+     "dy": -0.2
+    }
+   ]
+  },
+  {
+   "id": "kacamata",
+   "label": "Kacamata",
+   "category": "Love",
+   "parts": [
+    {
+     "file": "heart_glasses.png",
+     "anchor": "eyes",
+     "width": 1.05,
+     "dy": 0.02
+    }
+   ]
+  },
+  {
+   "id": "mata_love",
+   "label": "Mata Love",
+   "category": "Love",
+   "parts": [
+    {
+     "file": "heart_eyes.png",
+     "anchor": "eyes",
+     "width": 1.0
+    }
+   ]
+  },
+  {
+   "id": "pipi_love",
+   "label": "Pipi Love",
+   "category": "Love",
+   "parts": [
+    {
+     "file": "cheek_heart.png",
+     "anchor": "cheeks",
+     "width": 0.2
+    }
+   ]
+  },
+  {
+   "id": "kiss",
+   "label": "Kiss",
+   "category": "Love",
+   "parts": [
+    {
+     "file": "kiss.png",
+     "anchor": "cheeks",
+     "width": 0.26,
+     "dy": -0.02,
+     "rot": -15
+    }
+   ]
+  },
+  {
+   "id": "lingkar_love",
+   "label": "Love Ring",
+   "category": "Love",
+   "parts": [
+    {
+     "file": "heart_halo.png",
+     "anchor": "head",
+     "width": 1.5,
+     "dy": -0.05
+    }
+   ]
+  },
+  {
+   "id": "love_melayang",
+   "label": "Love Pop",
+   "category": "Love",
+   "parts": [
+    {
+     "file": "love_bubbles.png",
+     "anchor": "head",
+     "width": 0.6,
+     "dy": 0.05,
+     "dx": 0.55
+    }
+   ]
+  },
+  {
+   "id": "love_blush",
+   "label": "Love Pipi",
+   "category": "Love",
+   "parts": [
+    {
+     "file": "hearts.png",
+     "anchor": "head",
+     "width": 1.7,
+     "dy": -0.2
+    },
+    {
+     "file": "blush.png",
+     "anchor": "cheeks",
+     "width": 0.34
+    }
+   ]
+  },
+  {
+   "id": "pipi_bintang",
+   "label": "Pipi Star",
+   "category": "Glam",
+   "parts": [
+    {
+     "file": "cheek_star.png",
+     "anchor": "cheeks",
+     "width": 0.2
+    }
+   ]
+  },
+  {
+   "id": "permata",
+   "label": "Permata",
+   "category": "Glam",
+   "parts": [
+    {
+     "file": "gems.png",
+     "anchor": "eyes",
+     "width": 1.0,
+     "dy": 0.14
+    }
+   ]
+  },
+  {
+   "id": "glitter",
+   "label": "Glitter",
+   "category": "Glam",
+   "parts": [
+    {
+     "file": "tear_glitter.png",
+     "anchor": "eyes",
+     "width": 1.0,
+     "dy": 0.24
+    }
+   ]
+  },
+  {
+   "id": "freckles",
+   "label": "Freckles",
+   "category": "Glam",
+   "parts": [
+    {
+     "file": "freckles.png",
+     "anchor": "nose",
+     "width": 0.78,
+     "dy": -0.06
+    }
+   ]
+  },
+  {
+   "id": "bunga_telinga",
+   "label": "Hibiscus",
+   "category": "Glam",
+   "parts": [
+    {
+     "file": "hibiscus.png",
+     "anchor": "head",
+     "width": 0.42,
+     "dy": 0.5,
+     "dx": 0.55
+    }
+   ]
+  },
+  {
+   "id": "glam_sparkle",
+   "label": "Glam",
+   "category": "Glam",
+   "parts": [
+    {
+     "file": "sparkles.png",
+     "anchor": "head",
+     "width": 1.6,
+     "dy": -0.12
+    },
+    {
+     "file": "gems.png",
+     "anchor": "eyes",
+     "width": 1.0,
+     "dy": 0.14
+    }
+   ]
+  },
+  {
+   "id": "bunga_blush",
+   "label": "Bunga",
+   "category": "Glam",
+   "parts": [
+    {
+     "file": "flower_crown.png",
+     "anchor": "head",
+     "width": 1.25,
+     "dy": 0.08
+    },
+    {
+     "file": "blush.png",
+     "anchor": "cheeks",
+     "width": 0.34
+    }
+   ]
+  }
+ ]
 }

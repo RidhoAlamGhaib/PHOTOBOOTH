@@ -8,7 +8,8 @@ stickers/stickers.json, which lists each sticker as one or more parts:
 
 anchor: "head" (above the forehead), "eyes", "cheeks" (drawn on both cheeks),
 "nose" or "mouth". width: sticker width as a share of the face width. dy / dx:
-extra shift in face widths (dy < 0 = up), along the face's own tilt.
+extra shift in face widths (dy < 0 = up), along the face's own tilt. rot:
+extra tilt in degrees (optional). category: group name for the picker tabs.
 New stickers need no code: add the PNG and a line in stickers.json.
 
 Faces come from effects.detect_faces (YuNet: eyes, nose, mouth corners).
@@ -76,6 +77,16 @@ def catalog():
         return out
 
 
+def categories():
+    """Category names in the order they first appear in stickers.json."""
+    out = []
+    for st in catalog():
+        c = st.get("category") or "Lainnya"
+        if c not in out:
+            out.append(c)
+    return out
+
+
 def find(sticker_id):
     for st in catalog():
         if st["id"] == sticker_id:
@@ -113,9 +124,10 @@ def _placements(face, part):
     dx = float(part.get("dx", 0.0)) * fw
     dy = float(part.get("dy", 0.0)) * fw
     anchor = part.get("anchor", "head")
+    tilt = float(part.get("rot", 0.0))
 
     def at(px, py):
-        return (px + ux * dx + vx * dy, py + uy * dx + vy * dy, width, ang)
+        return (px + ux * dx + vx * dy, py + uy * dx + vy * dy, width, ang + tilt)
 
     if anchor == "eyes":
         return [at(ex, ey)]
@@ -130,8 +142,8 @@ def _placements(face, part):
     if anchor == "cheeks":
         out = []
         for (px, py), side in ((le, -1), (re, 1)):
-            cx = px + vx * 0.38 * fw + ux * side * 0.06 * fw
-            cy = py + vy * 0.38 * fw + uy * side * 0.06 * fw
+            cx = px + vx * 0.30 * fw + ux * side * 0.06 * fw
+            cy = py + vy * 0.30 * fw + uy * side * 0.06 * fw
             out.append(at(cx, cy))
         return out
     # head: above the forehead, about 0.55 face widths over the eyes

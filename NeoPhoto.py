@@ -3909,10 +3909,9 @@ class MainWindow(QMainWindow):
         cap_title.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 14px; font-weight: 800; "
                                 f"letter-spacing: 3px; background: transparent;")
         cap_col.addWidget(cap_title)
-        self._cap_sticker_btns = self._sticker_buttons(self.cap_sticker_bar, 64, self._pick_sticker)
-        for _, b in self._cap_sticker_btns:
-            cap_col.addWidget(b, 0, Qt.AlignHCenter)
-        cap_col.addStretch(1)
+        self._cap_picker = self._sticker_picker(self.cap_sticker_bar, cap_col, icon=56, btn_w=96,
+                                                btn_h=96, cols=2, scroll=True)
+        self._cap_sticker_btns = self._cap_picker["btns"]
         self.cap_sticker_bar.setVisible(_stickers_on("live"))
         self.preview_container = QWidget(screen)
         self.preview_container.setStyleSheet("background: transparent;")
@@ -4185,10 +4184,13 @@ class MainWindow(QMainWindow):
         st_title.setStyleSheet("color: #7A6488; font-size: 18px; font-weight: 800; letter-spacing: 4px; "
                                "background: transparent; padding: 4px 4px 8px 4px;")
         sb.addWidget(st_title, 0, 0, 1, 3)
-        self._fp_sticker_btns = self._sticker_buttons(self.fp_sticker_box, 40, self._pick_sticker)
-        for i, (_, b) in enumerate(self._fp_sticker_btns):
-            b.setFixedSize(80, 76)
-            sb.addWidget(b, 1 + i // 3, i % 3)
+        fp_col = QVBoxLayout()
+        fp_col.setContentsMargins(0, 0, 0, 0)
+        fp_col.setSpacing(8)
+        sb.addLayout(fp_col, 1, 0, 1, 3)
+        self._fp_picker = self._sticker_picker(self.fp_sticker_box, fp_col, icon=40, btn_w=80,
+                                               btn_h=76, cols=3, scroll=False)
+        self._fp_sticker_btns = self._fp_picker["btns"]
         sb.setContentsMargins(0, 0, 0, 14)
         self.filter_panel_layout.insertWidget(0, self.fp_sticker_box)   # stickers first, then filters
         self.fp_sticker_box.setVisible(_stickers_on())
@@ -5564,7 +5566,7 @@ class MainWindow(QMainWindow):
         avail_h = sh - avail_top - avail_bot
         avail_w = int(sw * 0.86)
         if _stickers_on("live"):
-            avail_w = min(avail_w, sw - 2 * (94 + 52))     # room for the sticker column
+            avail_w = min(avail_w, sw - 2 * (204 + 52))    # room for the sticker panel
         fit_h = avail_h
         fit_w = int(round(fit_h * preview_aspect))
         if fit_w > avail_w:
@@ -5584,10 +5586,14 @@ class MainWindow(QMainWindow):
             rpanel.raise_()
         bar = getattr(self, "cap_sticker_bar", None)
         if bar is not None:
-            n_btn = len(self._cap_sticker_btns)
-            bar_w = 94
-            bar_h = min(sh - 120, 30 + n_btn * 112)
-            bar_x = min(sw - bar_w - 24, pc_x + pc_w + 28)
+            bar_x = pc_x + pc_w + 28
+            bar_w = max(104, min(330, sw - bar_x - 20))
+            cols = max(1, min(3, (bar_w + 8) // 104))
+            if cols != self._cap_picker["cols"]:
+                self._cap_picker["cols"] = cols
+                self._show_sticker_cat(self._cap_picker, self._cap_picker["cat"])
+            bar_w = cols * 104 - 8 + 4
+            bar_h = max(200, min(sh - 120, pc_h + 40))
             bar.setGeometry(bar_x, max(90, pc_y + (pc_h - bar_h) // 2), bar_w, bar_h)
             bar.raise_()
         if not self.is_reviewing_final:
@@ -7249,6 +7255,86 @@ class MainWindow(QMainWindow):
             out.append((sid, b))
         return out
 
+    def _sticker_picker(self, parent, col_layout, icon, btn_w, btn_h, cols, scroll):
+        """Category tabs + a grid of sticker buttons (one category at a time).
+        Adds itself to col_layout; returns the picker dict."""
+        btns = self._sticker_buttons(parent, icon, self._pick_sticker)
+        for _, b in btns:
+            b.setFixedSize(btn_w, btn_h)
+            if btn_w < 90:
+                b.setStyleSheet(b.styleSheet().replace("font-size: 14px", "font-size: 12px"))
+        cats = stickers.categories()
+        picker = {"btns": btns, "cols": cols, "cat": cats[0] if cats else "", "chips": {},
+                  "cat_of": {st["id"]: st.get("category") or "Lainnya" for st in stickers.catalog()}}
+        if len(cats) > 1:
+            chips = QWidget(parent)
+            chips.setStyleSheet("background: transparent;")
+            cg = QGridLayout(chips)
+            cg.setContentsMargins(0, 0, 0, 0)
+            cg.setSpacing(6)
+            per_row = 3
+            for i, cat in enumerate(cats):
+                c = QPushButton(cat, chips)
+                c.setCheckable(True)
+                c.setFocusPolicy(Qt.NoFocus)
+                c.setCursor(Qt.PointingHandCursor)
+                c.setFixedHeight(36)
+                c.setMinimumWidth(10)
+                c.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+                c.setStyleSheet(f"""
+                    QPushButton {{ background: {COLORS['card']}; color: {COLORS['ink']};
+                                   border: 1px solid {COLORS['border']}; border-radius: 18px;
+                                   font-size: 13px; font-weight: 800; padding: 0 6px; }}
+                    QPushButton:checked {{ background: {COLORS['pink']}; color: white;
+                                           border: 1px solid {COLORS['pink']}; }}""")
+                c.clicked.connect(partial(self._show_sticker_cat, picker, cat))
+                cg.addWidget(c, i // per_row, i % per_row)
+                picker["chips"][cat] = c
+            col_layout.addWidget(chips)
+        host = QWidget()
+        host.setStyleSheet("background: transparent;")
+        grid = QGridLayout(host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(8)
+        grid.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        for _, b in btns:
+            b.setParent(host)
+        picker["grid"] = grid
+        if scroll:
+            area = QScrollArea(parent)
+            area.setWidgetResizable(True)
+            area.setFrameShape(QFrame.NoFrame)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+            area.viewport().setStyleSheet("background: transparent;")
+            area.setWidget(host)
+            enable_touch_scroll(area)
+            col_layout.addWidget(area, 1)
+            picker["area"] = area
+        else:
+            col_layout.addWidget(host)
+        self._show_sticker_cat(picker, picker["cat"])
+        return picker
+
+    def _show_sticker_cat(self, picker, cat):
+        """Show "Tanpa" + the stickers of one category in the picker's grid."""
+        picker["cat"] = cat
+        for c_name, chip in picker["chips"].items():
+            chip.setChecked(c_name == cat)
+        grid = picker["grid"]
+        for _, b in picker["btns"]:
+            grid.removeWidget(b)
+            b.hide()
+        shown = [b for sid, b in picker["btns"]
+                 if not sid or not picker["chips"] or picker["cat_of"].get(sid) == cat]
+        cols = max(1, picker["cols"])
+        for i, b in enumerate(shown):
+            grid.addWidget(b, i // cols, i % cols)
+            b.show()
+        area = picker.get("area")
+        if area is not None:
+            area.verticalScrollBar().setValue(0)
+
     def _pick_sticker(self, sid):
         self.sticker_id = sid
         LOG.info(f"[STICKER] {sid or 'none'}")
@@ -7261,6 +7347,9 @@ class MainWindow(QMainWindow):
 
     def _sync_sticker_buttons(self):
         sid = getattr(self, "sticker_id", "")
+        for picker in (getattr(self, "_cap_picker", None), getattr(self, "_fp_picker", None)):
+            if picker and sid and picker["chips"] and picker["cat_of"].get(sid, picker["cat"]) != picker["cat"]:
+                self._show_sticker_cat(picker, picker["cat_of"][sid])   # show the picked one
         for group in (getattr(self, "_cap_sticker_btns", []), getattr(self, "_fp_sticker_btns", [])):
             for s_id, b in group:
                 b.setChecked(s_id == sid)

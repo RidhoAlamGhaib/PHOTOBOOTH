@@ -48,6 +48,7 @@ Tambah satu entri di dalam `"stickers": [ ... ]` (jangan lupa koma di antara ent
 {
   "id": "topi_pantai",
   "label": "Topi Pantai",
+  "category": "Pesta",
   "parts": [
     {"file": "topi_pantai.png", "anchor": "head", "width": 1.3, "dy": -0.1}
   ]
@@ -57,13 +58,15 @@ Tambah satu entri di dalam `"stickers": [ ... ]` (jangan lupa koma di antara ent
 | Kolom | Isi |
 |---|---|
 | `id` | nama unik, huruf kecil tanpa spasi |
-| `label` | tulisan di tombol (pendek, maks ±12 huruf) |
+| `label` | tulisan di tombol (pendek, **maks 9 huruf** biar tidak terpotong) |
+| `category` | tab tempat sticker muncul: `Cute`, `Hewan`, `Pesta`, `Love`, `Glam`, atau nama baru (tab baru otomatis muncul, urut sesuai urutan di file) |
 | `parts` | satu atau lebih gambar; sticker gabungan (pita + blush) = dua part |
 | `file` | nama PNG di folder ini |
 | `anchor` | `head` / `eyes` / `cheeks` / `nose` / `mouth` |
 | `width` | lebar sticker dibanding lebar wajah. `1.0` = selebar wajah |
 | `dy` | geser **naik / turun** (dalam lebar wajah). Minus = naik. `-0.1` = naik sedikit |
 | `dx` | geser **kiri / kanan** (opsional). Minus = kiri |
+| `rot` | miring tambahan dalam derajat (opsional), misal topi miring `15` / `-15` |
 
 Contoh sticker gabungan (dua bagian sekaligus):
 
@@ -116,6 +119,7 @@ Coba juga foto **ramai-ramai** dan foto **kepala miring**, biar yakin.
 | Sticker tidak nempel di sebagian wajah | Wajah terlalu kecil, terlalu miring/nyamping, atau gelap: tidak terdeteksi. |
 | Ukuran terlalu besar / kecil | Ubah `width`. |
 
-Set bawaan (pita, kuping kucing, kuping kelinci, kacamata hati, blush, tiara, hati) dibuat oleh
+Set bawaan (55 sticker, 5 tab: Cute, Hewan, Pesta, Love, Glam) dibuat oleh
 `tools/make_stickers.py`; jalankan `python tools/make_stickers.py stickers` untuk menggambar ulang
-(menimpa PNG bawaan dan `stickers.json`, jadi simpan dulu sticker buatanmu).
+(menimpa PNG bawaan dan `stickers.json`, jadi simpan dulu sticker buatanmu, atau tambahkan
+stickermu ke daftar `SPEC` di bawah file itu).
