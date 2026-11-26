@@ -1,7 +1,7 @@
 """Beauty camera for the booth: natural skin retouch on every face.
 
 beautify(img_bgr, intensity) -> new image (same size). intensity 0..1 scales
-everything at once. Steps, per face (MediaPipe Face Mesh, 478 points):
+everything at once. Steps, per face (MediaPipe face landmarks, 478 points):
 
   1. Skin smoothing: frequency separation. The face's low frequencies are
      smoothed edge-preservingly (bilateral) and a little of the finest texture is
@@ -23,6 +23,8 @@ unchanged.
 """
 
 import logging
+import os
+import sys
 import threading
 
 import cv2
@@ -30,15 +32,52 @@ import numpy as np
 
 LOG = logging.getLogger("beauty")
 
+MODEL_NAME = "face_landmarker.task"
+
+
+def _model_path():
+    """models/face_landmarker.task next to the app, else the copy built into the exe."""
+    name = os.path.join("models", MODEL_NAME)
+    dirs = []
+    if getattr(sys, "frozen", False):
+        dirs.append(os.path.dirname(sys.executable))
+        if getattr(sys, "_MEIPASS", None):
+            dirs.append(sys._MEIPASS)
+    dirs.append(os.path.dirname(os.path.abspath(__file__)))
+    for d in dirs:
+        if os.path.exists(os.path.join(d, name)):
+            return os.path.join(d, name)
+    return os.path.join(dirs[0], name)
+
+
+# Two MediaPipe APIs: the Tasks FaceLandmarker (every mediapipe version from
+# 0.10 up, needs models/face_landmarker.task) and the old solutions.face_mesh
+# (mediapipe <= 0.10.14 only). Both give the same 478 points.
+_mp = _vision = _MESH = None
+_MODEL = None
 try:
     import mediapipe as _mp
-    _MESH = _mp.solutions.face_mesh
+    try:
+        from mediapipe.tasks.python import vision as _vision
+        from mediapipe.tasks.python.core import base_options as _base_options
+        _MODEL = _model_path()
+        if not os.path.exists(_MODEL):
+            LOG.warning(f"[BEAUTY] model not found at {_MODEL}")
+            _vision = None
+    except Exception as _e:
+        LOG.warning(f"[BEAUTY] MediaPipe Tasks not usable ({_e})")
+        _vision = None
+    if _vision is None:
+        _MESH = getattr(getattr(_mp, "solutions", None), "face_mesh", None)
 except Exception as _e:                      # app keeps working without it
-    _mp = None
-    _MESH = None
     LOG.warning(f"[BEAUTY] MediaPipe not available ({_e}); beauty is off")
 
-AVAILABLE = _MESH is not None
+AVAILABLE = _vision is not None or _MESH is not None
+if AVAILABLE:
+    LOG.info(f"[BEAUTY] ready: mediapipe {getattr(_mp, '__version__', '?')}, "
+             f"{'FaceLandmarker ' + _MODEL if _vision is not None else 'face_mesh'}")
+elif _mp is not None:
+    LOG.warning("[BEAUTY] MediaPipe has no face landmarker; beauty is off")
 
 # MediaPipe Face Mesh landmark indices.
 FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378,
@@ -59,39 +98,52 @@ GLOW_POINTS = [(117, 0.9), (346, 0.9), (6, 0.6), (197, 0.6), (195, 0.5), (199, 0
 JAW_A = [172, 136, 150]
 JAW_B = [397, 365, 379]
 
-_still_lock = threading.Lock()
-_live_lock = threading.Lock()
-_still_mesh = None
-_live_mesh = None
+_lock = threading.Lock()
+_engine = None                 # FaceLandmarker / FaceMesh, made on first use
 
 
-def _mesh(live):
-    global _still_mesh, _live_mesh
-    if not AVAILABLE:
-        return None
-    if live:
-        if _live_mesh is None:
-            _live_mesh = _MESH.FaceMesh(static_image_mode=False, max_num_faces=6,
-                                        refine_landmarks=True, min_detection_confidence=0.5,
-                                        min_tracking_confidence=0.5)
-        return _live_mesh
-    if _still_mesh is None:
-        _still_mesh = _MESH.FaceMesh(static_image_mode=True, max_num_faces=2,
-                                     refine_landmarks=True, min_detection_confidence=0.45)
-    return _still_mesh
-
-
-def _mesh_points(rgb, live):
-    lock = _live_lock if live else _still_lock
-    with lock:
+def _get_engine():
+    global _engine, AVAILABLE
+    if _engine is None:
         try:
-            res = _mesh(live).process(rgb)
+            if _vision is not None:
+                with open(_MODEL, "rb") as f:          # buffer: works with any path
+                    model = f.read()
+                opts = _vision.FaceLandmarkerOptions(
+                    base_options=_base_options.BaseOptions(
+                        model_asset_buffer=model,
+                        delegate=_base_options.BaseOptions.Delegate.CPU),
+                    running_mode=_vision.RunningMode.IMAGE, num_faces=2,
+                    min_face_detection_confidence=0.45, min_face_presence_confidence=0.45)
+                _engine = _vision.FaceLandmarker.create_from_options(opts)
+            else:
+                _engine = _MESH.FaceMesh(static_image_mode=True, max_num_faces=2,
+                                         refine_landmarks=True, min_detection_confidence=0.45)
         except Exception as e:
-            LOG.warning(f"[BEAUTY] face mesh failed: {e}")
-            return []
+            LOG.warning(f"[BEAUTY] cannot start face landmarker: {e}; beauty is off")
+            _engine = False
+            AVAILABLE = False
+    return _engine or None
+
+
+def _mesh_points(rgb, live=False):
+    """[478 x 2 point array in rgb's pixels] per face found in an RGB image."""
     h, w = rgb.shape[:2]
-    return [np.array([(p.x * w, p.y * h) for p in lm.landmark], np.float32)
-            for lm in (res.multi_face_landmarks or [])]
+    with _lock:
+        eng = _get_engine()
+        if eng is None:
+            return []
+        try:
+            if _vision is not None:
+                img = _mp.Image(image_format=_mp.ImageFormat.SRGB,
+                                data=np.ascontiguousarray(rgb))
+                faces = eng.detect(img).face_landmarks or []
+            else:
+                faces = [lm.landmark for lm in (eng.process(rgb).multi_face_landmarks or [])]
+        except Exception as e:
+            LOG.warning(f"[BEAUTY] face landmarks failed: {e}")
+            return []
+    return [np.array([(p.x * w, p.y * h) for p in lm], np.float32) for lm in faces]
 
 
 def find_faces(img_bgr, live=False, max_side=960):
@@ -125,7 +177,7 @@ def find_faces(img_bgr, live=False, max_side=960):
         if cs < 1:
             crop = cv2.resize(crop, (max(1, int(crop.shape[1] * cs)), max(1, int(crop.shape[0] * cs))),
                               interpolation=cv2.INTER_AREA)
-        found = _mesh_points(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB), False)
+        found = _mesh_points(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
         if found:
             # The face nearest the crop's centre is this box's face.
             c = np.array([crop.shape[1] / 2.0, crop.shape[0] / 2.0], np.float32)

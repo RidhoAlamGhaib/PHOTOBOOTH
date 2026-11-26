@@ -24,10 +24,10 @@ py -m venv .venv-build
 .venv-build\Scripts\activate
 python -m pip install --upgrade pip
 pip install pyinstaller pyqt5 opencv-python numpy pillow qrcode google-api-python-client google-auth google-auth-oauthlib pywin32 truststore certifi PyQtWebEngine
-pip install mediapipe==0.10.14
+pip install mediapipe
 ```
 
-`mediapipe` must be **0.10.14** (newer versions dropped the face mesh the beauty uses) and needs Python 3.8–3.12. It also installs `opencv-contrib-python`; that is fine (same `cv2`, more modules). If `import cv2` breaks after it, run `pip uninstall -y opencv-python opencv-contrib-python` then `pip install opencv-contrib-python`.
+`mediapipe`: any recent version (0.10.x or 1.x, every Python 3 version). Install it **inside** `.venv-build` (after `activate`, or `.venv-build\Scripts\python.exe -m pip install mediapipe`), not with `py -m pip`. The face model `models\face_landmarker.task` is in the repo and goes into the exe. mediapipe also installs `opencv-contrib-python`; that is fine (same `cv2`, more modules). If `import cv2` breaks after it, run `pip uninstall -y opencv-python opencv-contrib-python` then `pip install opencv-contrib-python`.
 
 What each one is for:
 
@@ -35,7 +35,7 @@ What each one is for:
 |---|---|
 | `pyqt5` | the whole UI |
 | `opencv-python`, `numpy` | camera frames, filters, beautify, video |
-| `mediapipe==0.10.14` | beauty (face mesh: skin smoothing, eyes, teeth, slim). Without it the app still runs, beauty is just off and the Beauty button is hidden. Adds ~60 MB to the exe. |
+| `mediapipe` | beauty (478 face points: skin smoothing, eyes, teeth, slim). Without it the app still runs, beauty is just off and the Beauty button is hidden. Adds ~60 MB to the exe. |
 | `pillow` | frame compositing, stamping, printing |
 | `qrcode` | QR on the print + done screen |
 | `google-api-python-client`, `google-auth`, `google-auth-oauthlib` | Drive upload |
@@ -175,7 +175,7 @@ Run `dist\NeoPhoto\NeoPhoto.exe`, then open the newest `logs\photobooth_YYYYMMDD
 | Canon | `[CAMERA] source=canon`, `[CANON] session opened`, `[CANON] live view -> PC` |
 | Fonts | `[FONT] ui='Nunito' display='Fredoka'` |
 | Stickers | `[STICKER] reading ...\stickers\stickers.json`, then `[STICKER] 8 sticker(s): pita, kucing, ...` |
-| Beauty | **no** `[BEAUTY] MediaPipe not available` line. If it is there, mediapipe 0.10.14 was missing from the build venv: install it and rebuild. |
+| Beauty | `[BEAUTY] ready: mediapipe ..., FaceLandmarker ...face_landmarker.task`. `MediaPipe not available` = mediapipe missing from the build venv: install it there and rebuild. `model not found` = `models\face_landmarker.task` missing. |
 | HTTPS | `[TLS] using the Windows certificate store (truststore)` |
 | Website DB | `[DB] uploaded session ...` |
 | Drive | `[GDRIVE] subfolder created: https://drive.google.com/...` |

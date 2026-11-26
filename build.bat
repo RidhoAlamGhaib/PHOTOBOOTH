@@ -12,10 +12,10 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-".venv-build\Scripts\python.exe" -c "import mediapipe; mediapipe.solutions.face_mesh" 2>nul
+".venv-build\Scripts\python.exe" -c "from mediapipe.tasks.python import vision" 2>nul
 if errorlevel 1 (
-  echo WARNING: mediapipe 0.10.14 not in .venv-build - beauty will be OFF in the exe. Install it:
-  echo   .venv-build\Scripts\python.exe -m pip install mediapipe==0.10.14
+  echo WARNING: mediapipe not in .venv-build - beauty will be OFF in the exe. Install it:
+  echo   .venv-build\Scripts\python.exe -m pip install mediapipe
   pause
 )
 ".venv-build\Scripts\python.exe" -m PyInstaller --noconfirm --onefile --clean --windowed --name NeoPhoto ^
