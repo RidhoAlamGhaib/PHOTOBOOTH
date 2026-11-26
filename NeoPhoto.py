@@ -30,6 +30,8 @@ from PIL import Image
 from effects import EFFECT_IDS, EFFECT_LABELS, apply_effect, detect_faces
 import dnp_status
 import stickers
+import beauty
+from looks import LOOK_IDS, LOOK_LABELS, apply_look
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
@@ -309,6 +311,19 @@ _FALLBACK_DEFAULTS = {
         "live": True,
         "video": True,
     },
+    # Beauty camera (beauty.py, needs MediaPipe): smoother skin, ring-light glow,
+    # brighter eyes / teeth, light contouring. intensity 0..1. Guests can switch it
+    # off on the live view before shooting; live = also on the live view.
+    "beauty": {
+        "enabled": True,
+        "intensity": 0.6,
+        "live": True,
+    },
+    # Filter panel: photobooth film looks. extra_effects = also the old lens /
+    # face effects (fisheye, big eyes, ...).
+    "filters": {
+        "extra_effects": False,
+    },
     # How customers get a session:
     #   "qris"   = choose a layout, pay with QRIS (bonus photos / extra prints are paid too)
     #   "coupon" = type the code bought on the website (order_items.code); the order's
@@ -489,6 +504,10 @@ SETTINGS_SPEC = [
         ("review_auto_confirm_seconds", "Lanjut otomatis setelah (detik)", "int", None),
         ("mirror", "Tampilan cermin", "choice", _YES_NO),
         ("customer_form.enabled", "Form data customer (mode QRIS)", "choice", _YES_NO),
+        ("beauty.enabled", "Beauty camera", "choice", _YES_NO),
+        ("beauty.intensity", "Kekuatan beauty", "choice", [(0.3, "Tipis"), (0.6, "Normal"), (0.9, "Kuat")]),
+        ("beauty.live", "Beauty di live view", "choice", _YES_NO),
+        ("filters.extra_effects", "Efek tambahan: fisheye, big eyes, ... (buka ulang app)", "choice", _YES_NO),
         ("stickers.enabled", "Sticker wajah", "choice", _YES_NO),
         ("stickers.live", "Sticker live di kamera", "choice", _YES_NO),
         ("stickers.video", "Sticker di video BTS & moving", "choice", _YES_NO),
@@ -2021,6 +2040,18 @@ def _stickers_on(what="enabled"):
     return bool(cfg.get("enabled", True)) and bool(cfg.get(what, True)) and bool(stickers.catalog())
 
 
+def _beauty_on(what="enabled"):
+    cfg = CONFIG.get("beauty", {}) or {}
+    return beauty.AVAILABLE and bool(cfg.get("enabled", True)) and bool(cfg.get(what, True))
+
+
+def _beauty_level():
+    try:
+        return float((CONFIG.get("beauty", {}) or {}).get("intensity", 0.6))
+    except (TypeError, ValueError):
+        return 0.6
+
+
 def _true_color():
     return bool(CONFIG.get("true_color", True))
 
@@ -2165,66 +2196,19 @@ FILTER_LABELS = {
     "none":  "Original", "bw": "B&W", "noir": "Noir", "sepia": "Sepia",
     "warm": "Warm", "cool": "Cool", "vivid": "Vivid", "soft": "Soft", "fade": "Fade",
 }
-# Lens / lighting / face-aware / artistic effects (effects.py).
-FILTER_IDS += EFFECT_IDS
-FILTER_LABELS.update(EFFECT_LABELS)
-
-def beautify(img_bgr, strength=1.0):
-    """Light auto-enhance for low-light / dull photos:
-      - auto brightness lift (only when the frame is dark)
-      - gentle white balance toward neutral
-      - skin-tone warmth + subtle smoothing
-      - mild contrast & saturation pop
-    `strength` 0.0 = off, 1.0 = default (medium), up to ~2.0 = strong.
-    Returns a new BGR uint8 array."""
-    if img_bgr is None or img_bgr.size == 0 or strength <= 0:
-        return img_bgr
-    s = float(strength)
-    out = img_bgr.astype(np.float32)
-
-    # 1) Auto brightness — measure mean luma; lift only if dark.
-    luma = 0.114 * out[..., 0] + 0.587 * out[..., 1] + 0.299 * out[..., 2]
-    mean_luma = float(luma.mean())
-    # Target a comfortable mid-brightness (~135). Lift scales with how dark
-    # it is, capped so bright photos aren't blown out.
-    target = 135.0
-    if mean_luma < target:
-        lift = 1.0 + min(0.6, (target - mean_luma) / target) * s
-        out = out * lift
-
-    # 2) Gentle gray-world white balance (reduce color cast from bad lighting).
-    b_mean = out[..., 0].mean() + 1e-5
-    g_mean = out[..., 1].mean() + 1e-5
-    r_mean = out[..., 2].mean() + 1e-5
-    gray = (b_mean + g_mean + r_mean) / 3.0
-    wb_amt = 0.5 * s  # partial correction so it stays natural
-    out[..., 0] *= (1.0 + wb_amt * (gray / b_mean - 1.0))
-    out[..., 1] *= (1.0 + wb_amt * (gray / g_mean - 1.0))
-    out[..., 2] *= (1.0 + wb_amt * (gray / r_mean - 1.0))
-
-    # 3) Skin warmth — small boost to red, tiny drop to blue.
-    out[..., 2] = out[..., 2] * (1.0 + 0.05 * s) + 4 * s   # R
-    out[..., 0] = out[..., 0] * (1.0 - 0.03 * s)            # B
-    out = np.clip(out, 0, 255).astype(np.uint8)
-
-    # 4) Mild contrast (S-curve) + saturation pop in HSV.
-    hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV).astype(np.float32)
-    hsv[..., 1] = np.clip(hsv[..., 1] * (1.0 + 0.12 * s), 0, 255)  # saturation
-    hsv[..., 2] = np.clip(hsv[..., 2] * (1.0 + 0.04 * s), 0, 255)  # brightness
-    out = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
-
-    # 5) Subtle skin smoothing — bilateral blur blended back so it's not plastic.
-    smooth_amt = min(1.0, 0.5 * s)
-    if smooth_amt > 0.01:
-        smoothed = cv2.bilateralFilter(out, d=7, sigmaColor=40, sigmaSpace=40)
-        out = cv2.addWeighted(out, 1.0 - smooth_amt * 0.6,
-                              smoothed, smooth_amt * 0.6, 0)
-    return out
-
+# Photobooth film looks (looks.py); the basic list above stays usable from config.
+FILTER_IDS = ["none"] + list(LOOK_IDS)
+FILTER_LABELS.update(LOOK_LABELS)
+# Lens / lighting / face-aware / artistic effects (effects.py), when switched on.
+if (CONFIG.get("filters", {}) or {}).get("extra_effects", False):
+    FILTER_IDS += EFFECT_IDS
+    FILTER_LABELS.update(EFFECT_LABELS)
 
 def apply_filter(img_bgr, name):
     if name in (None, "", "none"):
         return img_bgr
+    if name in LOOK_IDS:
+        return apply_look(img_bgr, name)
     img = img_bgr
     if img is None or img.size == 0:
         return img
@@ -3876,6 +3860,19 @@ class MainWindow(QMainWindow):
                            font-size: 22px; font-weight: 800; }}""")
         self.btn_ready_cancel.clicked.connect(self._ready_cancel)
         rrow.addWidget(self.btn_ready_cancel)
+        self.btn_beauty = QPushButton("Beauty ON")
+        self.btn_beauty.setCheckable(True)
+        self.btn_beauty.setFixedSize(200, 72)
+        self.btn_beauty.setCursor(Qt.PointingHandCursor)
+        self.btn_beauty.setFocusPolicy(Qt.NoFocus)
+        self.btn_beauty.setStyleSheet(f"""
+            QPushButton {{ background: {COLORS['card']}; color: {COLORS['ink_soft']};
+                           border: 1px solid {COLORS['border']}; border-radius: 6px;
+                           font-size: 22px; font-weight: 800; }}
+            QPushButton:checked {{ background: {COLORS['pink_soft']}; color: {COLORS['pink_dk']};
+                                   border: 2px solid {COLORS['pink']}; }}""")
+        self.btn_beauty.clicked.connect(self._toggle_beauty)
+        rrow.addWidget(self.btn_beauty)
         self.btn_ready_start = QPushButton("MULAI FOTO")
         self.btn_ready_start.setFixedSize(360, 72)
         self.btn_ready_start.setCursor(Qt.PointingHandCursor)
@@ -4187,11 +4184,11 @@ class MainWindow(QMainWindow):
         st_title = QLabel("STICKER")
         st_title.setStyleSheet("color: #7A6488; font-size: 18px; font-weight: 800; letter-spacing: 4px; "
                                "background: transparent; padding: 4px 4px 8px 4px;")
-        sb.addWidget(st_title, 0, 0, 1, 2)
-        self._fp_sticker_btns = self._sticker_buttons(self.fp_sticker_box, 56, self._pick_sticker)
+        sb.addWidget(st_title, 0, 0, 1, 3)
+        self._fp_sticker_btns = self._sticker_buttons(self.fp_sticker_box, 40, self._pick_sticker)
         for i, (_, b) in enumerate(self._fp_sticker_btns):
-            b.setFixedSize(118, 100)
-            sb.addWidget(b, 1 + i // 2, i % 2)
+            b.setFixedSize(80, 76)
+            sb.addWidget(b, 1 + i // 3, i % 3)
         sb.setContentsMargins(0, 0, 0, 14)
         self.filter_panel_layout.insertWidget(0, self.fp_sticker_box)   # stickers first, then filters
         self.fp_sticker_box.setVisible(_stickers_on())
@@ -5696,6 +5693,18 @@ class MainWindow(QMainWindow):
                 self._fit_cam_aspect = fa
                 self._fit_capture_layout()
                 w, h = self.preview_label.width(), self.preview_label.height()
+        if getattr(self, "beauty_on", False) and _beauty_on("live"):
+            # Retouch at about the size shown (fast), only what the guest sees.
+            fs = min(1.0, max(w, h) / float(max(frame.shape[:2])))
+            if fs < 0.95:
+                frame = cv2.resize(frame, (max(1, int(frame.shape[1] * fs)), max(1, int(frame.shape[0] * fs))),
+                                   interpolation=cv2.INTER_AREA)
+            self._bty_n = getattr(self, "_bty_n", 0) + 1
+            faces = getattr(self, "_bty_faces", None)
+            if faces is None or self._bty_n % 2 or getattr(self, "_bty_shape", None) != frame.shape:
+                faces = beauty.find_faces(frame, live=True)          # every other frame
+                self._bty_faces, self._bty_shape = faces, frame.shape
+            frame = beauty.beautify(frame, _beauty_level(), faces=faces, live=True)
         sid = getattr(self, "sticker_id", "")
         if sid and _stickers_on("live"):
             frame = self._stk_tracker.draw(frame, sid)      # what the guest sees, not saved
@@ -5886,7 +5895,8 @@ class MainWindow(QMainWindow):
     def _fp_thumb(self, shot_key, frame, w, h):
         flt = getattr(self, "current_filter", "none")
         adj = (getattr(self, "_adjust", None) or {}).get(shot_key)
-        key = (shot_key, flt, w, h, adj, getattr(self, "sticker_id", ""))
+        key = (shot_key, flt, w, h, adj, getattr(self, "sticker_id", ""),
+               bool(getattr(self, "beauty_on", False)))
         frame = self._with_sticker(frame)
         pix = self._fp_thumb_cache.get(key)
         if pix is not None:
@@ -5900,9 +5910,6 @@ class MainWindow(QMainWindow):
         if sc < 1.0:
             src = cv2.resize(frame, (max(1, int(fw * sc)), max(1, int(fh * sc))),
                              interpolation=cv2.INTER_AREA)
-        bty = 0.0 if _true_color() else float(CONFIG.get("beautify_strength", 0.0))
-        if bty > 0:
-            src = beautify(src, bty)
         if flt and flt != "none":
             src = apply_filter(src, flt)
         rgb = np.ascontiguousarray(cv2.cvtColor(src, cv2.COLOR_BGR2RGB))
@@ -6127,6 +6134,7 @@ class MainWindow(QMainWindow):
         self.camera.crop = not _full_frame()
         self._adjust = {}                # photo key -> (zoom, cx, cy) from the frame screen
         self.sticker_id = ""             # face sticker of this session ("" = none)
+        self.beauty_on = _beauty_on()    # guests can switch it off on the live view
         self._stk_cache = {}
         self._stk_tracker = stickers.LiveTracker(every=2)
         self._sync_sticker_buttons()
@@ -6170,6 +6178,9 @@ class MainWindow(QMainWindow):
         self.btn_ready_start.setEnabled(True)
         self.btn_ready_start.setText("MULAI FOTO")
         self.btn_ready_cancel.setVisible(bool(coupon))
+        self.btn_beauty.setVisible(_beauty_on())
+        self.btn_beauty.setChecked(bool(getattr(self, "beauty_on", False)))
+        self.btn_beauty.setText("Beauty ON" if self.btn_beauty.isChecked() else "Beauty OFF")
         self.ready_banner.hide()
         self.countdown_label.hide()
         self.ready_panel.show()
@@ -6198,6 +6209,11 @@ class MainWindow(QMainWindow):
         m, s_ = divmod(max(0, self._ready_left), 60)
         self.ready_timer_lbl.setText(f"Tekan MULAI dalam {m:02d}:{s_:02d}" if coupon
                                      else f"Mulai otomatis dalam {m:02d}:{s_:02d}")
+
+    def _toggle_beauty(self):
+        self.beauty_on = self.btn_beauty.isChecked()
+        self.btn_beauty.setText("Beauty ON" if self.beauty_on else "Beauty OFF")
+        LOG.info(f"[BEAUTY] {'on' if self.beauty_on else 'off'} (guest)")
 
     def _ready_cancel(self):
         LOG.info(f"[COUPON] {(getattr(self, '_coupon', None) or {}).get('code')}: cancelled, code stays unused")
@@ -7146,7 +7162,6 @@ class MainWindow(QMainWindow):
         self._fp_hits = list(slot_pose_pairs)      # hole rects, for taps on the preview
         self._fp_canvas_wh = (ow, oh)
         flt = getattr(self, "current_filter", "none")
-        bty = 0.0 if _true_color() else float(CONFIG.get("beautify_strength", 0.0))
         if has_transparent_slots:
             masks = _hole_masks(np.array(overlay)[:, :, 3], [r for r, _ in slot_pose_pairs])
             for (rect, pose_idx), mask in zip(slot_pose_pairs, masks):
@@ -7157,7 +7172,6 @@ class MainWindow(QMainWindow):
                 if adj is not None:
                     # Placed by the guest on the frame screen.
                     img_bgr = crop_adjusted(f, int(cw), int(ch), adj)
-                    if bty > 0: img_bgr = beautify(img_bgr, bty)
                     img_bgr = apply_filter(img_bgr, flt)
                     img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
                     if mask is None:
@@ -7172,7 +7186,6 @@ class MainWindow(QMainWindow):
                     sc = 2.0 * max(cw, ch) / float(max(f.shape[:2]))
                     img_bgr = cv2.resize(f, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA) \
                         if sc < 1.0 else f
-                if bty > 0: img_bgr = beautify(img_bgr, bty)
                 img_bgr = apply_filter(img_bgr, flt)
                 place_photo_in_hole(canvas, img_bgr, rect, mask,
                                     fit_mode=getattr(self, "fit_mode", "cover"))
@@ -7188,22 +7201,24 @@ class MainWindow(QMainWindow):
                     img_bgr = crop_adjusted(f, int(cw), int(ch), adj)
                 else:
                     img_bgr = crop_center_to_aspect(f, cw, ch, fit_mode=getattr(self, "fit_mode", "cover"))
-                if bty > 0: img_bgr = beautify(img_bgr, bty)
                 img_bgr = apply_filter(img_bgr, flt)
                 img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
                 canvas.paste(img, (x, y))
         return canvas
 
     def _with_sticker(self, frame):
-        """The photo with this session's face sticker (cached per photo)."""
+        """The photo as the guest chose it: beauty retouch, then the face sticker
+        (cached per photo; the stored photo stays untouched)."""
         sid = getattr(self, "sticker_id", "") if _stickers_on() else ""
-        if not sid or frame is None:
+        retouch = _beauty_level() if (getattr(self, "beauty_on", False) and _beauty_on()) else 0.0
+        if (not sid and retouch <= 0) or frame is None:
             return frame
         cache = self.__dict__.setdefault("_stk_cache", {})
-        key = (id(frame), sid)
+        key = (id(frame), sid, retouch)
         hit = cache.get(key)
         if hit is None or hit[0] is not frame:
-            hit = (frame, stickers.draw(frame, sid))
+            img = beauty.beautify(frame, retouch) if retouch > 0 else frame
+            hit = (frame, stickers.draw(img, sid) if sid else img)
             cache[key] = hit
         return hit[1]
 
@@ -7425,6 +7440,7 @@ class MainWindow(QMainWindow):
         self._pending_frame_n = self.shots_per_session
         self._pending_filter = getattr(self, "current_filter", "none")
         self._pending_sticker = getattr(self, "sticker_id", "") if _stickers_on() else ""
+        self._pending_beauty = bool(getattr(self, "beauty_on", False)) and _beauty_on()
         self._pending_indiv_fx = self.chk_indiv_fx.isChecked()
         coupon = getattr(self, "_coupon", None)
         self._pending_coupon = dict(coupon) if coupon else None
@@ -7592,7 +7608,7 @@ class MainWindow(QMainWindow):
         styled = bool(getattr(self, "_pending_indiv_fx", icfg.get("apply_filter", True)))
         flt = getattr(self, "_pending_filter", "none") if styled else "none"
         sticker = getattr(self, "_pending_sticker", "") if styled else ""
-        bty = 0.0 if _true_color() else float(CONFIG.get("beautify_strength", 0.0))
+        retouch = _beauty_level() if getattr(self, "_pending_beauty", False) else 0.0
         quality = int(icfg.get("jpeg_quality", 95))
         out_dir = SAVE_DIR / f"SESSION_{ts}"
 
@@ -7601,8 +7617,8 @@ class MainWindow(QMainWindow):
                 out_dir.mkdir(parents=True, exist_ok=True)
                 for i, frame in enumerate(shots):
                     try:
-                        img = stickers.draw(frame, sticker) if sticker else frame
-                        img = beautify(img, bty) if bty > 0 else img
+                        img = beauty.beautify(frame, retouch) if retouch > 0 else frame
+                        img = stickers.draw(img, sticker) if sticker else img
                         img = apply_filter(img, flt)
                         name = f"foto_{i + 1:02d}"
                         if i in picked:

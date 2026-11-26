@@ -12,15 +12,22 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+".venv-build\Scripts\python.exe" -c "import mediapipe; mediapipe.solutions.face_mesh" 2>nul
+if errorlevel 1 (
+  echo WARNING: mediapipe 0.10.14 not in .venv-build - beauty will be OFF in the exe. Install it:
+  echo   .venv-build\Scripts\python.exe -m pip install mediapipe==0.10.14
+  pause
+)
 ".venv-build\Scripts\python.exe" -m PyInstaller --noconfirm --onefile --clean --windowed --name NeoPhoto ^
   --add-data "EDSDK\Dll;EDSDK\Dll" ^
   --add-data "stickers;stickers" --add-data "models;models" ^
-  --hidden-import canon_edsdk --hidden-import effects --hidden-import stickers --hidden-import dnp_status --hidden-import web_bridge --hidden-import PyQt5.QtWebEngineWidgets ^
+  --hidden-import canon_edsdk --hidden-import effects --hidden-import stickers --hidden-import beauty --hidden-import looks --hidden-import dnp_status --hidden-import web_bridge --hidden-import PyQt5.QtWebEngineWidgets ^
   --hidden-import win32print --hidden-import win32ui --hidden-import win32con ^
   --hidden-import qrcode --hidden-import truststore --hidden-import certifi ^
   --hidden-import google.oauth2.credentials --hidden-import google_auth_oauthlib.flow ^
   --hidden-import google.auth.transport.requests ^
   --hidden-import googleapiclient.discovery --hidden-import googleapiclient.http ^
+  --hidden-import mediapipe --collect-data mediapipe --collect-binaries mediapipe ^
   --collect-data googleapiclient --collect-data certifi ^
   --exclude-module tkinter ^
   NeoPhoto.py
