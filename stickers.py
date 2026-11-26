@@ -35,9 +35,21 @@ _images = {}             # file name -> BGRA array
 
 
 def _sticker_dir():
-    base = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
-            else os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "stickers")
+    """stickers/ next to the app (your own set), else the copy built into the exe."""
+    dirs = []
+    if getattr(sys, "frozen", False):
+        dirs.append(os.path.join(os.path.dirname(sys.executable), "stickers"))
+        if getattr(sys, "_MEIPASS", None):
+            dirs.append(os.path.join(sys._MEIPASS, "stickers"))
+    dirs.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "stickers"))
+    for d in dirs:
+        if os.path.exists(os.path.join(d, "stickers.json")):
+            return d
+    return dirs[0]
+
+
+def file_path(file_name):
+    return os.path.join(_sticker_dir(), file_name)
 
 
 def catalog():
@@ -48,6 +60,7 @@ def catalog():
             return _catalog
         out = []
         path = os.path.join(_sticker_dir(), "stickers.json")
+        LOG.info(f"[STICKER] reading {path}")
         try:
             with open(path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)

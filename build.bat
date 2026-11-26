@@ -14,7 +14,8 @@ if errorlevel 1 (
 )
 ".venv-build\Scripts\python.exe" -m PyInstaller --noconfirm --onefile --clean --windowed --name NeoPhoto ^
   --add-data "EDSDK\Dll;EDSDK\Dll" ^
-  --hidden-import canon_edsdk --hidden-import effects --hidden-import dnp_status --hidden-import web_bridge --hidden-import PyQt5.QtWebEngineWidgets ^
+  --add-data "stickers;stickers" --add-data "models;models" ^
+  --hidden-import canon_edsdk --hidden-import effects --hidden-import stickers --hidden-import dnp_status --hidden-import web_bridge --hidden-import PyQt5.QtWebEngineWidgets ^
   --hidden-import win32print --hidden-import win32ui --hidden-import win32con ^
   --hidden-import qrcode --hidden-import truststore --hidden-import certifi ^
   --hidden-import google.oauth2.credentials --hidden-import google_auth_oauthlib.flow ^

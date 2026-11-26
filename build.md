@@ -92,7 +92,7 @@ the exe's folder. If nothing is found, the error lists every folder it searched.
 ## 4. Copy the runtime files next to the exe
 
 When frozen, the app reads and writes everything **next to `NeoPhoto.exe`**, not inside the bundle.
-Don't bundle these with `--add-data`; copy them after building. For `--onefile` (exe lands in `dist\`):
+Copy these after building (`build.bat` does it). For `--onefile` (exe lands in `dist\`):
 
 ```bat
 mkdir dist\NeoPhoto
@@ -100,11 +100,16 @@ move /Y dist\NeoPhoto.exe dist\NeoPhoto\
 xcopy /E /I /Y frames dist\NeoPhoto\frames
 xcopy /E /I /Y models dist\NeoPhoto\models
 xcopy /E /I /Y fonts dist\NeoPhoto\fonts
+xcopy /E /I /Y stickers dist\NeoPhoto\stickers
 copy /Y CyStat64.dll dist\NeoPhoto\
 copy /Y config.json dist\NeoPhoto\
 ```
 
 (Without `--onefile` the exe is already in `dist\NeoPhoto\`; skip the first two lines.)
+
+`stickers\` and `models\` are also built into the exe (`--add-data`) as a fallback: face stickers
+and face detection work even if those folders are missing on the booth PC. A `stickers\` folder
+next to the exe wins over the built-in set, so new stickers can be added without rebuilding.
 
 Copy these too **if you have them**:
 
@@ -119,6 +124,8 @@ Copy these too **if you have them**:
 | `codes.json` | Access codes | `access_code.mode = "paid"` |
 | `thank_you.png` / `thank_you.txt` | Uploaded into each guest's folder | Optional |
 | `fonts\` | Fredoka (titles) + Nunito (text) `.ttf` | Yes (without it the app falls back to Segoe UI) |
+| `stickers\` | Face stickers (PNG + `stickers.json`, see `stickers\README.md`) | Optional: the exe has the built-in set; needed for your own stickers |
+| `backgrounds\` | Pictures for the per-step backgrounds (Settings > Tampilan) | Only if you use picture backgrounds |
 | `session_stats.json` | Session counter | Only if you want to keep the old count |
 
 `captures\` and `logs\` are created automatically.
@@ -135,6 +142,8 @@ NeoPhoto\
 ├─ frames\
 ├─ models\
 ├─ fonts\
+├─ stickers\            (optional: your own stickers)
+├─ backgrounds\         (optional: background pictures)
 ├─ captures\             (auto)
 └─ logs\                 (auto)
 ```
@@ -161,6 +170,7 @@ Run `dist\NeoPhoto\NeoPhoto.exe`, then open the newest `logs\photobooth_YYYYMMDD
 | Config loaded | `[CONFIG] OK loaded from ...\config.json` |
 | Canon | `[CAMERA] source=canon`, `[CANON] session opened`, `[CANON] live view -> PC` |
 | Fonts | `[FONT] ui='Nunito' display='Fredoka'` |
+| Stickers | `[STICKER] reading ...\stickers\stickers.json`, then `[STICKER] 8 sticker(s): pita, kucing, ...` |
 | HTTPS | `[TLS] using the Windows certificate store (truststore)` |
 | Website DB | `[DB] uploaded session ...` |
 | Drive | `[GDRIVE] subfolder created: https://drive.google.com/...` |

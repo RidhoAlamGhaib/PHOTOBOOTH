@@ -7221,7 +7221,7 @@ class MainWindow(QMainWindow):
             b.setText(label)
             b.setFixedSize(icon + 30, icon + 40)
             if files:
-                pm = QPixmap(str(BASE_DIR / "stickers" / files[0]))
+                pm = QPixmap(stickers.file_path(files[0]))
                 if not pm.isNull():
                     b.setIcon(QIcon(pm.scaled(icon, icon, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
                     b.setIconSize(QSize(icon, icon))

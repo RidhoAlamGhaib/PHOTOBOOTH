@@ -127,7 +127,10 @@ def detect_faces(img):
     faces = []
     with _det_lock:
         if _yunet is None:
-            path = os.path.join(_app_dir(), "models", "face_detection_yunet_2023mar.onnx")
+            name = os.path.join("models", "face_detection_yunet_2023mar.onnx")
+            path = os.path.join(_app_dir(), name)
+            if not os.path.exists(path) and getattr(sys, "_MEIPASS", None):
+                path = os.path.join(sys._MEIPASS, name)       # copy built into the exe
             try:
                 if os.path.exists(path) and hasattr(cv2, "FaceDetectorYN"):
                     _yunet = cv2.FaceDetectorYN.create(path, "", (sw, sh), 0.6, 0.3, 50)
