@@ -1,0 +1,109 @@
+{
+  "stickers": [
+    {
+      "id": "pita",
+      "label": "Pita",
+      "parts": [
+        {
+          "file": "bow.png",
+          "anchor": "head",
+          "width": 0.8,
+          "dy": -0.08
+        }
+      ]
+    },
+    {
+      "id": "kucing",
+      "label": "Kucing",
+      "parts": [
+        {
+          "file": "cat_ears.png",
+          "anchor": "head",
+          "width": 1.4,
+          "dy": 0.0
+        },
+        {
+          "file": "blush.png",
+          "anchor": "cheeks",
+          "width": 0.34
+        }
+      ]
+    },
+    {
+      "id": "kelinci",
+      "label": "Kelinci",
+      "parts": [
+        {
+          "file": "bunny_ears.png",
+          "anchor": "head",
+          "width": 0.95,
+          "dy": -0.35
+        }
+      ]
+    },
+    {
+      "id": "kacamata",
+      "label": "Kacamata",
+      "parts": [
+        {
+          "file": "heart_glasses.png",
+          "anchor": "eyes",
+          "width": 1.05,
+          "dy": 0.02
+        }
+      ]
+    },
+    {
+      "id": "blush",
+      "label": "Blush",
+      "parts": [
+        {
+          "file": "blush.png",
+          "anchor": "cheeks",
+          "width": 0.36
+        }
+      ]
+    },
+    {
+      "id": "tiara",
+      "label": "Tiara",
+      "parts": [
+        {
+          "file": "tiara.png",
+          "anchor": "head",
+          "width": 0.85,
+          "dy": 0.0
+        }
+      ]
+    },
+    {
+      "id": "love",
+      "label": "Love",
+      "parts": [
+        {
+          "file": "hearts.png",
+          "anchor": "head",
+          "width": 1.7,
+          "dy": -0.2
+        }
+      ]
+    },
+    {
+      "id": "pita_blush",
+      "label": "Pita + Blush",
+      "parts": [
+        {
+          "file": "bow.png",
+          "anchor": "head",
+          "width": 0.8,
+          "dy": -0.08
+        },
+        {
+          "file": "blush.png",
+          "anchor": "cheeks",
+          "width": 0.34
+        }
+      ]
+    }
+  ]
+}

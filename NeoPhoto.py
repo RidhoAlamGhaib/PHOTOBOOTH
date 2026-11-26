@@ -29,6 +29,7 @@ import numpy as np
 from PIL import Image
 from effects import EFFECT_IDS, EFFECT_LABELS, apply_effect, detect_faces
 import dnp_status
+import stickers
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSizePolicy, QMessageBox,
@@ -298,6 +299,13 @@ _FALLBACK_DEFAULTS = {
     "capture": {
         "full_frame": True,
     },
+    # Face stickers (stickers/ folder): live on the camera screen, changeable on the
+    # frame screen; video = also on the behind-the-scene / moving-picture videos.
+    "stickers": {
+        "enabled": True,
+        "live": True,
+        "video": True,
+    },
     # How customers get a session:
     #   "qris"   = choose a layout, pay with QRIS (bonus photos / extra prints are paid too)
     #   "coupon" = type the code bought on the website (order_items.code); the order's
@@ -478,6 +486,9 @@ SETTINGS_SPEC = [
         ("review_auto_confirm_seconds", "Lanjut otomatis setelah (detik)", "int", None),
         ("mirror", "Tampilan cermin", "choice", _YES_NO),
         ("customer_form.enabled", "Form data customer (mode QRIS)", "choice", _YES_NO),
+        ("stickers.enabled", "Sticker wajah", "choice", _YES_NO),
+        ("stickers.live", "Sticker live di kamera", "choice", _YES_NO),
+        ("stickers.video", "Sticker di video BTS & moving", "choice", _YES_NO),
     ]),
     ("Cetak & upload", [
         ("printing.enabled", "Cetak foto", "choice", _YES_NO),
@@ -2002,6 +2013,11 @@ def clamp_adjust(img_shape, target_w, target_h, adj):
     return (zoom, min(max(cx, hw), 1.0 - hw), min(max(cy, hh), 1.0 - hh))
 
 
+def _stickers_on(what="enabled"):
+    cfg = CONFIG.get("stickers", {}) or {}
+    return bool(cfg.get("enabled", True)) and bool(cfg.get(what, True)) and bool(stickers.catalog())
+
+
 def _true_color():
     return bool(CONFIG.get("true_color", True))
 
@@ -2771,8 +2787,9 @@ class BackgroundSaverThread(QThread):
                  bts_buffer, moving_clips, captured_frames,
                  video_fps, bts_speed, bts_max_duration_s, moving_speed,
                  overlay_path, slot_rects, slot_to_pose=None, fit_mode="cover",
-                 moving_clip_s=3.0):
+                 moving_clip_s=3.0, sticker_id=""):
         super().__init__(parent)
+        self._sticker_id  = sticker_id
         self._bts_path    = bts_mp4_path
         self._mov_path    = mov_mp4_path
         self._bts_buffer  = list(bts_buffer)
@@ -2825,8 +2842,9 @@ class BackgroundSaverThread(QThread):
         writer = cv2.VideoWriter(str(mp4_path), fourcc, fps, (w, h))
         if not writer.isOpened():
             raise RuntimeError("Cannot open VideoWriter")
+        tracker = stickers.LiveTracker(every=1) if self._sticker_id else None
         for i in picked_idx:
-            writer.write(src[i])
+            writer.write(tracker.draw(src[i], self._sticker_id) if tracker else src[i])
         writer.release()
 
     def _write_moving(self, mp4_path):
@@ -2851,6 +2869,9 @@ class BackgroundSaverThread(QThread):
             else:
                 frames_src = [np.zeros((rects[slot_idx][3], rects[slot_idx][2], 3), dtype=np.uint8)]
             clips_src.append(frames_src)
+        if self._sticker_id:
+            clips_src = [[tr.draw(f, self._sticker_id) for f in clip]
+                         for clip, tr in ((c, stickers.LiveTracker(every=1)) for c in clips_src)]
         clip_len = min(len(c) for c in clips_src)
         if clip_len < 1:
             clip_len = 1
@@ -3824,6 +3845,23 @@ class MainWindow(QMainWindow):
         self._rec_blink_timer.setInterval(600)
         self._rec_blink_timer.timeout.connect(self._toggle_rec_blink)
         self._rec_visible = True
+        # Face stickers, tap to try them on live (right of the camera view).
+        self.cap_sticker_bar = QWidget(screen)
+        self.cap_sticker_bar.setAttribute(Qt.WA_StyledBackground, True)
+        self.cap_sticker_bar.setStyleSheet("background: transparent;")
+        cap_col = QVBoxLayout(self.cap_sticker_bar)
+        cap_col.setContentsMargins(0, 0, 0, 0)
+        cap_col.setSpacing(8)
+        cap_title = QLabel("STICKER")
+        cap_title.setAlignment(Qt.AlignCenter)
+        cap_title.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 14px; font-weight: 800; "
+                                f"letter-spacing: 3px; background: transparent;")
+        cap_col.addWidget(cap_title)
+        self._cap_sticker_btns = self._sticker_buttons(self.cap_sticker_bar, 64, self._pick_sticker)
+        for _, b in self._cap_sticker_btns:
+            cap_col.addWidget(b, 0, Qt.AlignHCenter)
+        cap_col.addStretch(1)
+        self.cap_sticker_bar.setVisible(_stickers_on("live"))
         self.preview_container = QWidget(screen)
         self.preview_container.setStyleSheet("background: transparent;")
         self.preview_label = QLabel("", self.preview_container)
@@ -4086,6 +4124,22 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(lambda _=False, f=fid: self._set_filter(f))
             self.filter_panel_layout.addWidget(btn)
             self.filter_cards[fid] = btn
+        self.fp_sticker_box = QWidget()
+        self.fp_sticker_box.setStyleSheet("background: transparent;")
+        sb = QGridLayout(self.fp_sticker_box)
+        sb.setContentsMargins(0, 14, 0, 0)
+        sb.setSpacing(8)
+        st_title = QLabel("STICKER")
+        st_title.setStyleSheet("color: #7A6488; font-size: 18px; font-weight: 800; letter-spacing: 4px; "
+                               "background: transparent; padding: 4px 4px 8px 4px;")
+        sb.addWidget(st_title, 0, 0, 1, 2)
+        self._fp_sticker_btns = self._sticker_buttons(self.fp_sticker_box, 56, self._pick_sticker)
+        for i, (_, b) in enumerate(self._fp_sticker_btns):
+            b.setFixedSize(118, 100)
+            sb.addWidget(b, 1 + i // 2, i % 2)
+        sb.setContentsMargins(0, 0, 0, 14)
+        self.filter_panel_layout.insertWidget(0, self.fp_sticker_box)   # stickers first, then filters
+        self.fp_sticker_box.setVisible(_stickers_on())
         self.filter_panel_layout.addStretch(1)
         self.filter_panel_scroll.setWidget(self.filter_panel_host)
         enable_touch_scroll(self.filter_panel_scroll)
@@ -5609,6 +5663,8 @@ class MainWindow(QMainWindow):
         avail_bot = bottom_pad + progress_pill_h + progress_pill_gap + thumb_strip_h + 16
         avail_h = sh - avail_top - avail_bot
         avail_w = int(sw * 0.86)
+        if _stickers_on("live"):
+            avail_w = min(avail_w, sw - 2 * (94 + 52))     # room for the sticker column
         fit_h = avail_h
         fit_w = int(round(fit_h * preview_aspect))
         if fit_w > avail_w:
@@ -5618,6 +5674,14 @@ class MainWindow(QMainWindow):
         pc_x = (sw - pc_w) // 2
         pc_y = avail_top + (avail_h - pc_h) // 2
         self.preview_container.setGeometry(pc_x, pc_y, pc_w, pc_h)
+        bar = getattr(self, "cap_sticker_bar", None)
+        if bar is not None:
+            n_btn = len(self._cap_sticker_btns)
+            bar_w = 94
+            bar_h = min(sh - 120, 30 + n_btn * 112)
+            bar_x = min(sw - bar_w - 24, pc_x + pc_w + 28)
+            bar.setGeometry(bar_x, max(90, pc_y + (pc_h - bar_h) // 2), bar_w, bar_h)
+            bar.raise_()
         if not self.is_reviewing_final:
             self.preview_label.setGeometry(0, 0, pc_w, pc_h)
         cd_h = int(min(pc_w, pc_h) * 0.45)
@@ -5713,6 +5777,9 @@ class MainWindow(QMainWindow):
             h = self.preview_label.height()
         if w < 10 or h < 10:
             return
+        sid = getattr(self, "sticker_id", "")
+        if sid and _stickers_on("live"):
+            frame = self._stk_tracker.draw(frame, sid)      # what the guest sees, not saved
         rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimg).scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -5900,7 +5967,8 @@ class MainWindow(QMainWindow):
     def _fp_thumb(self, shot_key, frame, w, h):
         flt = getattr(self, "current_filter", "none")
         adj = (getattr(self, "_adjust", None) or {}).get(shot_key)
-        key = (shot_key, flt, w, h, adj)
+        key = (shot_key, flt, w, h, adj, getattr(self, "sticker_id", ""))
+        frame = self._with_sticker(frame)
         pix = self._fp_thumb_cache.get(key)
         if pix is not None:
             return pix
@@ -6139,6 +6207,10 @@ class MainWindow(QMainWindow):
         self._create_camera()
         self.camera.crop = not _full_frame()
         self._adjust = {}                # photo key -> (zoom, cx, cy) from the frame screen
+        self.sticker_id = ""             # face sticker of this session ("" = none)
+        self._stk_cache = {}
+        self._stk_tracker = stickers.LiveTracker(every=2)
+        self._sync_sticker_buttons()
         self.current_filter = "none"
         self.bts_buffer = []
         self.rolling_buffer = []
@@ -6334,17 +6406,20 @@ class MainWindow(QMainWindow):
                 LOG.warning(f"[COLOR] skin tone fix failed: {e}")
         self.current_frame_data = frame
         self.is_reviewing = True
-        rgb = cv2.cvtColor(self.current_frame_data, cv2.COLOR_BGR2RGB)
-        qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
-        w = self.preview_label.width()
-        h = self.preview_label.height()
-        if w >= 10 and h >= 10:
-            self.preview_label.setPixmap(QPixmap.fromImage(qimg).scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self._show_review_pixmap()
         remaining = self.max_retakes_per_shot - self.retakes_used
         self._style_retake_button(enabled=(remaining > 0), remaining=remaining)
         self.review_widget.show()
         self.review_widget.raise_()
         self._start_review_auto_confirm()
+
+    def _show_review_pixmap(self):
+        rgb = cv2.cvtColor(self._with_sticker(self.current_frame_data), cv2.COLOR_BGR2RGB)
+        qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
+        w = self.preview_label.width()
+        h = self.preview_label.height()
+        if w >= 10 and h >= 10:
+            self.preview_label.setPixmap(QPixmap.fromImage(qimg).scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def _start_review_auto_confirm(self):
         secs = int(CONFIG.get("review_auto_confirm_seconds", 5))
@@ -7044,7 +7119,7 @@ class MainWindow(QMainWindow):
             for (rect, pose_idx), mask in zip(slot_pose_pairs, masks):
                 x, y, cw, ch = rect
                 if cw < 1 or ch < 1: continue
-                f = self.captured_frames[pose_idx]
+                f = self._with_sticker(self.captured_frames[pose_idx])
                 adj = self._adjust_for(pose_idx)
                 if adj is not None:
                     # Placed by the guest on the frame screen.
@@ -7074,7 +7149,7 @@ class MainWindow(QMainWindow):
             for (rect, pose_idx) in slot_pose_pairs:
                 x, y, cw, ch = rect
                 if cw < 1 or ch < 1: continue
-                f = self.captured_frames[pose_idx]
+                f = self._with_sticker(self.captured_frames[pose_idx])
                 adj = self._adjust_for(pose_idx)
                 if adj is not None:
                     img_bgr = crop_adjusted(f, int(cw), int(ch), adj)
@@ -7085,6 +7160,68 @@ class MainWindow(QMainWindow):
                 img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
                 canvas.paste(img, (x, y))
         return canvas
+
+    def _with_sticker(self, frame):
+        """The photo with this session's face sticker (cached per photo)."""
+        sid = getattr(self, "sticker_id", "") if _stickers_on() else ""
+        if not sid or frame is None:
+            return frame
+        cache = self.__dict__.setdefault("_stk_cache", {})
+        key = (id(frame), sid)
+        hit = cache.get(key)
+        if hit is None or hit[0] is not frame:
+            hit = (frame, stickers.draw(frame, sid))
+            cache[key] = hit
+        return hit[1]
+
+    def _sticker_buttons(self, parent, icon, on_pick):
+        """Buttons for "no sticker" + every sticker: [(sticker_id, button)]."""
+        out = []
+        for sid, label, files in [("", "Tanpa", [])] + [
+                (st["id"], st["label"], [p["file"] for p in st["parts"]]) for st in stickers.catalog()]:
+            b = QToolButton(parent)
+            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            b.setCheckable(True)
+            b.setAutoExclusive(True)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setText(label)
+            b.setFixedSize(icon + 30, icon + 40)
+            if files:
+                pm = QPixmap(str(BASE_DIR / "stickers" / files[0]))
+                if not pm.isNull():
+                    b.setIcon(QIcon(pm.scaled(icon, icon, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+                    b.setIconSize(QSize(icon, icon))
+            b.setStyleSheet(f"""
+                QToolButton {{ background: {COLORS['card']}; color: {COLORS['ink']};
+                               border: 1px solid {COLORS['border']}; border-radius: 6px;
+                               font-size: 14px; font-weight: 700; padding: 4px; }}
+                QToolButton:checked {{ border: 3px solid {COLORS['pink']}; }}""")
+            b.clicked.connect(partial(on_pick, sid))
+            out.append((sid, b))
+        return out
+
+    def _pick_sticker(self, sid):
+        self.sticker_id = sid
+        LOG.info(f"[STICKER] {sid or 'none'}")
+        self._sync_sticker_buttons()
+        if self.stack.currentIndex() == self.SCREEN_FRAMES:
+            self._populate_fp_slots()
+            self._render_fp_preview()
+        elif self.is_reviewing and self.current_frame_data is not None:
+            self._show_review_pixmap()
+
+    def _sync_sticker_buttons(self):
+        sid = getattr(self, "sticker_id", "")
+        for group in (getattr(self, "_cap_sticker_btns", []), getattr(self, "_fp_sticker_btns", [])):
+            for s_id, b in group:
+                b.setChecked(s_id == sid)
+        bar = getattr(self, "cap_sticker_bar", None)
+        if bar is not None:
+            bar.setVisible(_stickers_on("live"))
+        box = getattr(self, "fp_sticker_box", None)
+        if box is not None:
+            box.setVisible(_stickers_on())
 
     def _photo_key(self, idx):
         """Same key as the frame-screen thumbnails: the photo, not its slot, so a
@@ -7125,7 +7262,7 @@ class MainWindow(QMainWindow):
         view.setStyleSheet("background: black; border: 2px solid white;")
         top = 124
         view.setGeometry((host.width() - vw) // 2, top, vw, vh)
-        f = self.captured_frames[pose_idx]
+        f = self._with_sticker(self.captured_frames[pose_idx])
         view.set_photo(f, aspect, self._adjust_for(pose_idx) or (1.0, 0.5, 0.5))
         row_y = top + vh + 24
         btn_css = ("QPushButton { background: white; color: #1A1918; border: 1px solid white; "
@@ -7254,6 +7391,7 @@ class MainWindow(QMainWindow):
         self._pending_picked = list(self.picked_indices or range(len(self._pending_all_shots)))
         self._pending_frame_n = self.shots_per_session
         self._pending_filter = getattr(self, "current_filter", "none")
+        self._pending_sticker = getattr(self, "sticker_id", "") if _stickers_on() else ""
         self._pending_indiv_fx = self.chk_indiv_fx.isChecked()
         coupon = getattr(self, "_coupon", None)
         self._pending_coupon = dict(coupon) if coupon else None
@@ -7420,6 +7558,7 @@ class MainWindow(QMainWindow):
         # Customer's checkbox on the frame screen (default: config apply_filter).
         styled = bool(getattr(self, "_pending_indiv_fx", icfg.get("apply_filter", True)))
         flt = getattr(self, "_pending_filter", "none") if styled else "none"
+        sticker = getattr(self, "_pending_sticker", "") if styled else ""
         bty = 0.0 if _true_color() else float(CONFIG.get("beautify_strength", 0.0))
         quality = int(icfg.get("jpeg_quality", 95))
         out_dir = SAVE_DIR / f"SESSION_{ts}"
@@ -7429,7 +7568,8 @@ class MainWindow(QMainWindow):
                 out_dir.mkdir(parents=True, exist_ok=True)
                 for i, frame in enumerate(shots):
                     try:
-                        img = beautify(frame, bty) if bty > 0 else frame
+                        img = stickers.draw(frame, sticker) if sticker else frame
+                        img = beautify(img, bty) if bty > 0 else img
                         img = apply_filter(img, flt)
                         name = f"foto_{i + 1:02d}"
                         if i in picked:
@@ -7592,6 +7732,8 @@ class MainWindow(QMainWindow):
                 slot_to_pose=slot_to_pose,
                 fit_mode=getattr(self, "fit_mode", "cover"),
                 moving_clip_s=self.moving_clip_s,
+                sticker_id=(getattr(self, "_pending_sticker", "")
+                            if _stickers_on("video") else ""),
             )
             self._bg_saver.finished_save.connect(
                 partial(self._on_videos_done, png_path=png_path,
@@ -8059,6 +8201,7 @@ class MainWindow(QMainWindow):
         self._refresh_home_texts()
         self.max_retakes_per_shot = int(cfg_get("max_retakes_per_shot", 2) or 0)
         self.qris = make_qris_client()
+        self._sync_sticker_buttons()
         self._reset_to_home()
         self._apply_screen_background()
         self._show_popup(self.stack.widget(self.SCREEN_HOME), "Tersimpan",

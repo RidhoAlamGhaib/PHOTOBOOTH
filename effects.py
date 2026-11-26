@@ -116,8 +116,9 @@ _haar = None
 
 
 def detect_faces(img):
-    """List of faces: dict(box=(x, y, w, h), eyes=[(x, y), (x, y)]) in the
-    image's own pixel coords. Biggest face first."""
+    """List of faces: dict(box=(x, y, w, h), eyes=[(x, y), (x, y)], nose=(x, y),
+    mouth=[(x, y), (x, y)]) in the image's own pixel coords. Biggest face first.
+    Without YuNet (Haar fallback) the points are estimated from the box."""
     global _yunet, _haar
     h, w = img.shape[:2]
     s = min(1.0, 640.0 / max(h, w))
@@ -142,7 +143,9 @@ def detect_faces(img):
             for r in (res if res is not None else []):
                 x, y, fw, fh = (r[:4] / s).tolist()
                 eyes = [(r[4] / s, r[5] / s), (r[6] / s, r[7] / s)]
-                faces.append(dict(box=(x, y, fw, fh), eyes=eyes))
+                nose = (r[8] / s, r[9] / s)
+                mouth = [(r[10] / s, r[11] / s), (r[12] / s, r[13] / s)]
+                faces.append(dict(box=(x, y, fw, fh), eyes=eyes, nose=nose, mouth=mouth))
         else:
             if _haar is None:
                 _haar = cv2.CascadeClassifier(
@@ -151,7 +154,9 @@ def detect_faces(img):
             for (x, y, fw, fh) in _haar.detectMultiScale(gray, 1.1, 5, minSize=(30, 30)):
                 x, y, fw, fh = x / s, y / s, fw / s, fh / s
                 eyes = [(x + 0.3 * fw, y + 0.4 * fh), (x + 0.7 * fw, y + 0.4 * fh)]
-                faces.append(dict(box=(x, y, fw, fh), eyes=eyes))
+                nose = (x + 0.5 * fw, y + 0.6 * fh)
+                mouth = [(x + 0.35 * fw, y + 0.78 * fh), (x + 0.65 * fw, y + 0.78 * fh)]
+                faces.append(dict(box=(x, y, fw, fh), eyes=eyes, nose=nose, mouth=mouth))
     faces.sort(key=lambda f: -f["box"][2] * f["box"][3])
     return faces
 
