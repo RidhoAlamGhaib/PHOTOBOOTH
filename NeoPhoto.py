@@ -1996,6 +1996,7 @@ def _full_frame():
 
 
 ADJUST_ZOOM_MAX = 4.0
+RETOUCH_MAX_SIDE = 3400      # beauty / sticker copies of a photo: enough for any print hole
 
 
 def crop_adjusted(img_bgr, target_w, target_h, adj):
@@ -3234,7 +3235,7 @@ class MainWindow(QMainWindow):
             self.fit_mode = fit_mode
         except Exception:
             self.fit_mode = "cover"
-        self.camera.frame_ready.connect(self._update_preview)
+        self.camera.frame_ready.connect(self._on_cam_frame)
         if self.canon_mode:
             self.camera.still_ready.connect(self._on_canon_still)
             self.camera.capture_failed.connect(self._on_canon_capture_failed)
@@ -5646,6 +5647,21 @@ class MainWindow(QMainWindow):
         rv_h = 100
         self.review_widget.setGeometry((sw - rv_w) // 2, sh - pp_h - bottom_pad - rv_h - 12, rv_w, rv_h)
 
+    def _on_cam_frame(self, frame, raw_frame, is_cropped):
+        """Camera thread -> GUI. Keep only the newest frame and handle it once
+        the GUI is free: when a frame takes longer than the camera's interval,
+        older frames are dropped instead of piling up (no growing delay)."""
+        self._cam_pending = (frame, raw_frame, is_cropped)
+        if not getattr(self, "_cam_drain_queued", False):
+            self._cam_drain_queued = True
+            QTimer.singleShot(0, self._drain_cam_frame)
+
+    def _drain_cam_frame(self):
+        self._cam_drain_queued = False
+        item, self._cam_pending = getattr(self, "_cam_pending", None), None
+        if item is not None:
+            self._update_preview(*item)
+
     def _update_preview(self, frame, raw_frame, is_cropped):
         if CONFIG.get("mirror", True):
             # Selfie view: customer's left on the left. Applied here so the
@@ -5699,9 +5715,12 @@ class MainWindow(QMainWindow):
                 self._fit_cam_aspect = fa
                 self._fit_capture_layout()
                 w, h = self.preview_label.width(), self.preview_label.height()
+        fx_t0 = time.perf_counter()
         if getattr(self, "beauty_on", False) and _beauty_on("live"):
-            # Retouch at about the size shown (fast), only what the guest sees.
-            fs = min(1.0, max(w, h) / float(max(frame.shape[:2])))
+            # Retouch at about the size shown (fast), only what the guest sees;
+            # smaller still when this PC can't keep up (see _live_cap below).
+            cap = getattr(self, "_live_cap", 1280)
+            fs = min(1.0, min(max(w, h), cap) / float(max(frame.shape[:2])))
             if fs < 0.95:
                 frame = cv2.resize(frame, (max(1, int(frame.shape[1] * fs)), max(1, int(frame.shape[0] * fs))),
                                    interpolation=cv2.INTER_AREA)
@@ -5713,7 +5732,26 @@ class MainWindow(QMainWindow):
             frame = beauty.beautify(frame, _beauty_level(), faces=faces, live=True)
         sid = getattr(self, "sticker_id", "")
         if sid and _stickers_on("live"):
+            if max(frame.shape[:2]) > getattr(self, "_live_cap", 1280):
+                fs = getattr(self, "_live_cap", 1280) / float(max(frame.shape[:2]))
+                frame = cv2.resize(frame, (max(1, int(frame.shape[1] * fs)), max(1, int(frame.shape[0] * fs))),
+                                   interpolation=cv2.INTER_AREA)
             frame = self._stk_tracker.draw(frame, sid)      # what the guest sees, not saved
+        fx_dt = time.perf_counter() - fx_t0
+        if fx_dt > 0.002:
+            # Effects time per frame (smoothed). Over ~45 ms the live view would
+            # stutter: work on a smaller picture; plenty of room: go back up.
+            # Waits 10 frames after each change (and at the start: the first
+            # frames include loading the face models).
+            n = getattr(self, "_live_fx_n", 0) + 1
+            ema = 0.8 * getattr(self, "_live_fx_ema", fx_dt) + 0.2 * fx_dt
+            self._live_fx_n, self._live_fx_ema = n, ema
+            cap = getattr(self, "_live_cap", 1280)
+            if n >= 10 and ema > 0.045 and cap > 480:
+                self._live_cap, self._live_fx_n = max(480, int(cap * 0.8)), 0
+                LOG.info(f"[LIVE] effects {ema * 1000:.0f} ms/frame -> working size {self._live_cap}px")
+            elif n >= 10 and ema < 0.018 and cap < 1280:
+                self._live_cap, self._live_fx_n = min(1280, int(cap * 1.15)), 0
         rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimg).scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -6142,6 +6180,8 @@ class MainWindow(QMainWindow):
         self.sticker_id = ""             # face sticker of this session ("" = none)
         self.beauty_on = _beauty_on()    # guests can switch it off on the live view
         self._stk_cache = {}
+        self._bty_cache = {}
+        self._face_cache = {}
         self._stk_tracker = stickers.LiveTracker(every=2)
         self._sync_sticker_buttons()
         self.current_filter = "none"
@@ -7212,19 +7252,52 @@ class MainWindow(QMainWindow):
                 canvas.paste(img, (x, y))
         return canvas
 
+    def _retouched(self, frame, retouch):
+        """The photo at <= RETOUCH_MAX_SIDE px with the beauty retouch (cached per
+        photo, independent of the sticker, so changing stickers is quick)."""
+        cache = self.__dict__.setdefault("_bty_cache", {})
+        key = (id(frame), retouch)
+        hit = cache.get(key)
+        if hit is not None and hit[0] is frame:
+            return hit[1]
+        h, w = frame.shape[:2]
+        s = min(1.0, RETOUCH_MAX_SIDE / float(max(h, w)))
+        img = cv2.resize(frame, (max(1, int(w * s)), max(1, int(h * s))),
+                         interpolation=cv2.INTER_AREA) if s < 1.0 else frame
+        if retouch > 0:
+            img = beauty.beautify(img, retouch)
+        if len(cache) >= 24:                       # one session never has this many photos
+            cache.pop(next(iter(cache)))
+        cache[key] = (frame, img)
+        return img
+
     def _with_sticker(self, frame):
-        """The photo as the guest chose it: beauty retouch, then the face sticker
-        (cached per photo; the stored photo stays untouched)."""
+        """The photo as the guest chose it: beauty retouch, then the face sticker.
+        A copy of at most RETOUCH_MAX_SIDE px (plenty for the print holes); the
+        stored photo stays untouched. Cached per photo for the current sticker."""
         sid = getattr(self, "sticker_id", "") if _stickers_on() else ""
         retouch = _beauty_level() if (getattr(self, "beauty_on", False) and _beauty_on()) else 0.0
         if (not sid and retouch <= 0) or frame is None:
             return frame
+        base = self._retouched(frame, retouch)
+        if not sid:
+            return base
         cache = self.__dict__.setdefault("_stk_cache", {})
         key = (id(frame), sid, retouch)
         hit = cache.get(key)
         if hit is None or hit[0] is not frame:
-            img = beauty.beautify(frame, retouch) if retouch > 0 else frame
-            hit = (frame, stickers.draw(img, sid) if sid else img)
+            for k in [k for k in cache if k[1] != sid or k[2] != retouch]:
+                del cache[k]                       # keep only the sticker on screen
+            fcache = self.__dict__.setdefault("_face_cache", {})
+            fhit = fcache.get(id(frame))
+            if fhit is None or fhit[0] is not base:
+                try:
+                    fhit = (base, detect_faces(base))      # once per photo, not per sticker
+                except Exception as e:
+                    LOG.warning(f"[STICKER] face detection failed: {e}")
+                    fhit = (base, [])
+                fcache[id(frame)] = fhit
+            hit = (frame, stickers.draw(base, sid, fhit[1]))
             cache[key] = hit
         return hit[1]
 
