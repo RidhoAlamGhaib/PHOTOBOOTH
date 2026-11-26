@@ -298,6 +298,9 @@ _FALLBACK_DEFAULTS = {
     # photo inside its hole on the frame screen. false = old behaviour (cut at capture).
     "capture": {
         "full_frame": True,
+        # Live view before the first shot: guests pick a sticker and press MULAI FOTO;
+        # a paid session starts by itself after this many seconds.
+        "ready_seconds": 60,
     },
     # Face stickers (stickers/ folder): live on the camera screen, changeable on the
     # frame screen; video = also on the behind-the-scene / moving-picture videos.
@@ -3845,6 +3848,58 @@ class MainWindow(QMainWindow):
         self._rec_blink_timer.setInterval(600)
         self._rec_blink_timer.timeout.connect(self._toggle_rec_blink)
         self._rec_visible = True
+        # Before the first shot: live view, pick a sticker, then MULAI FOTO.
+        self.ready_panel = QWidget(screen)
+        self.ready_panel.setAttribute(Qt.WA_StyledBackground, True)
+        self.ready_panel.setObjectName("readyPanel")
+        self.ready_panel.setStyleSheet(f"#readyPanel {{ background: {COLORS['card']}; "
+                                       f"border: 1px solid {COLORS['border']}; border-radius: 6px; }}")
+        rp = QVBoxLayout(self.ready_panel)
+        rp.setContentsMargins(24, 14, 24, 14)
+        rp.setSpacing(10)
+        self.ready_hint = QLabel("Pilih sticker di samping, lalu tekan MULAI FOTO kalau sudah siap")
+        self.ready_hint.setAlignment(Qt.AlignCenter)
+        self.ready_hint.setWordWrap(True)
+        self.ready_hint.setStyleSheet(f"color: {COLORS['ink']}; font-size: 20px; font-weight: 700; "
+                                      f"background: transparent; border: none;")
+        rp.addWidget(self.ready_hint)
+        rrow = QHBoxLayout()
+        rrow.setSpacing(16)
+        rrow.addStretch(1)
+        self.btn_ready_cancel = QPushButton("Batal")
+        self.btn_ready_cancel.setFixedSize(180, 72)
+        self.btn_ready_cancel.setCursor(Qt.PointingHandCursor)
+        self.btn_ready_cancel.setFocusPolicy(Qt.NoFocus)
+        self.btn_ready_cancel.setStyleSheet(f"""
+            QPushButton {{ background: {COLORS['card']}; color: {COLORS['ink']};
+                           border: 1px solid {COLORS['border']}; border-radius: 6px;
+                           font-size: 22px; font-weight: 800; }}""")
+        self.btn_ready_cancel.clicked.connect(self._ready_cancel)
+        rrow.addWidget(self.btn_ready_cancel)
+        self.btn_ready_start = QPushButton("MULAI FOTO")
+        self.btn_ready_start.setFixedSize(360, 72)
+        self.btn_ready_start.setCursor(Qt.PointingHandCursor)
+        self.btn_ready_start.setFocusPolicy(Qt.NoFocus)
+        self.btn_ready_start.setStyleSheet(f"""
+            QPushButton {{ background: {COLORS['pink']}; color: white; border: 1px solid {COLORS['pink_dk']};
+                           border-radius: 6px; font-size: 30px; font-weight: 800; }}
+            QPushButton:disabled {{ background: {COLORS['pink_soft']}; color: {COLORS['ink_soft']}; }}""")
+        self.btn_ready_start.clicked.connect(self._ready_start)
+        rrow.addWidget(self.btn_ready_start)
+        rrow.addStretch(1)
+        rp.addLayout(rrow)
+        self.ready_timer_lbl = QLabel("")
+        self.ready_timer_lbl.setAlignment(Qt.AlignCenter)
+        self.ready_timer_lbl.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 18px; font-weight: 700; "
+                                           f"background: transparent; border: none;")
+        rp.addWidget(self.ready_timer_lbl)
+        self.ready_panel.hide()
+        self._ready_mode = False
+        self._ready_job = None
+        self._ready_left = 0
+        self._ready_tick = QTimer(self)
+        self._ready_tick.setInterval(1000)
+        self._ready_tick.timeout.connect(self._ready_tick_fn)
         # Face stickers, tap to try them on live (right of the camera view).
         self.cap_sticker_bar = QWidget(screen)
         self.cap_sticker_bar.setAttribute(Qt.WA_StyledBackground, True)
@@ -5115,73 +5170,6 @@ class MainWindow(QMainWindow):
         self._coupon_screen = screen
         self._coupon = None
         self._coupon_job = None
-        self._build_coupon_start_screen()
-
-    def _build_coupon_start_screen(self):
-        """Code checked: the customer presses MULAI to start (only then is the code
-        used up). No press within payment.coupon_start_minutes -> back home."""
-        screen = QWidget()
-        screen.setStyleSheet("background: transparent;")
-        root = QVBoxLayout(screen)
-        root.setContentsMargins(80, 40, 80, 40)
-        root.setSpacing(0)
-        root.addStretch(1)
-        title = QLabel("Kode Valid!")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet(f"color: {COLORS['ink']}; font-size: 60px; font-weight: 800; "
-                            f"font-family: '{FONT_DISPLAY}'; background: transparent;")
-        root.addWidget(title)
-        root.addSpacing(10)
-        self.cs_info = QLabel("")
-        self.cs_info.setAlignment(Qt.AlignCenter)
-        self.cs_info.setWordWrap(True)
-        self.cs_info.setStyleSheet(f"color: {COLORS['pink_dk']}; font-size: 28px; font-weight: 800; "
-                                   f"background: transparent;")
-        root.addWidget(self.cs_info)
-        root.addSpacing(8)
-        hint = QLabel("Sudah siap? Tekan MULAI FOTO kalau semua sudah di depan kamera ya, Kak.")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {COLORS['ink_soft']}; font-size: 22px; font-weight: 600; "
-                           f"background: transparent;")
-        root.addWidget(hint)
-        root.addSpacing(40)
-        self.btn_cs_start = QPushButton("MULAI FOTO")
-        self.btn_cs_start.setFixedSize(480, 120)
-        self.btn_cs_start.setCursor(Qt.PointingHandCursor)
-        self.btn_cs_start.setFocusPolicy(Qt.NoFocus)
-        self.btn_cs_start.setStyleSheet(f"""
-            QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                               stop:0 {COLORS['pink']}, stop:1 {COLORS['lilac']});
-                           color: white; border: 4px solid white; border-radius: 60px;
-                           font-size: 40px; font-weight: 900; }}
-            QPushButton:disabled {{ background: {COLORS['pink_soft']}; }}""")
-        self._add_shadow(self.btn_cs_start, blur=40, y_offset=12, alpha=150)
-        self.btn_cs_start.clicked.connect(self._coupon_start_pressed)
-        root.addWidget(self.btn_cs_start, 0, Qt.AlignHCenter)
-        root.addSpacing(24)
-        self.cs_timer_lbl = QLabel("")
-        self.cs_timer_lbl.setAlignment(Qt.AlignCenter)
-        self.cs_timer_lbl.setStyleSheet(f"color: {COLORS['ink']}; font-size: 26px; font-weight: 700; "
-                                        f"font-family: '{FONT_MONO}'; background: transparent;")
-        root.addWidget(self.cs_timer_lbl)
-        root.addSpacing(30)
-        btn_cancel = QPushButton("Batal")
-        btn_cancel.setFixedSize(220, 64)
-        btn_cancel.setCursor(Qt.PointingHandCursor)
-        btn_cancel.setFocusPolicy(Qt.NoFocus)
-        btn_cancel.setStyleSheet(self.btn_cf_back.styleSheet())
-        btn_cancel.clicked.connect(self._coupon_start_cancel)
-        root.addWidget(btn_cancel, 0, Qt.AlignHCenter)
-        root.addStretch(1)
-        self.stack.addWidget(screen)
-        self.SCREEN_COUPON_START = self.stack.indexOf(screen)
-        self._coupon_start_screen = screen
-        self._cs_job = None
-        self._cs_left = 0
-        self._cs_tick = QTimer(self)
-        self._cs_tick.setInterval(1000)
-        self._cs_tick.timeout.connect(self._coupon_start_tick)
 
     def _goto_coupon_input(self):
         self._coupon = None
@@ -5279,94 +5267,9 @@ class MainWindow(QMainWindow):
         self._promo = None
         self._payment_info = None
         self._session_access_code = code
+        # Straight to the live camera: stickers, then MULAI FOTO (only that uses the code).
         QTimer.singleShot(700, lambda: self.stack.currentIndex() == self.SCREEN_COUPON
-                          and self._coupon and self._goto_coupon_start(lay))
-
-    def _goto_coupon_start(self, lay):
-        try:
-            minutes = float(_payment_cfg().get("coupon_start_minutes", 5) or 5)
-        except (TypeError, ValueError):
-            minutes = 5
-        self._cs_left = max(10, int(minutes * 60))
-        self._cs_job = None
-        n = self._coupon["print_count"]
-        self.cs_info.setText(f"{lay.get('name', '')}  \u00b7  {n} cetak")
-        self.btn_cs_start.setEnabled(True)
-        self.btn_cs_start.setText("MULAI FOTO")
-        self._coupon_start_tick(first=True)
-        self._cs_tick.start()
-        self.stack.setCurrentIndex(self.SCREEN_COUPON_START)
-
-    def _coupon_start_tick(self, first=False):
-        if self.stack.currentIndex() != self.SCREEN_COUPON_START and not first:
-            self._cs_tick.stop()
-            return
-        if not first:
-            self._cs_left -= 1
-        if self._cs_left <= 0 and self._cs_job is None:
-            self._cs_tick.stop()
-            LOG.info(f"[COUPON] {(self._coupon or {}).get('code')}: start not pressed in time, "
-                     f"code stays unused")
-            self._reset_to_home()
-            self._show_popup(self.stack.widget(self.SCREEN_HOME), "Waktu habis",
-                             "Kode kamu belum terpakai. Masukkan lagi kodenya kalau sudah siap ya, Kak.")
-            return
-        m, s_ = divmod(max(0, self._cs_left), 60)
-        self.cs_timer_lbl.setText(f"Tekan MULAI dalam {m:02d}:{s_:02d}")
-
-    def _coupon_start_cancel(self):
-        self._cs_tick.stop()
-        self._cs_job = None
-        LOG.info(f"[COUPON] {(self._coupon or {}).get('code')}: cancelled, code stays unused")
-        self._reset_to_home()
-
-    def _coupon_start_pressed(self):
-        """Use the code up on the website, then start the photos."""
-        if self._cs_job is not None or not self._coupon:
-            return
-        c = self._coupon
-        job = {"code": c["code"]}
-        self._cs_job = job
-        self.btn_cs_start.setEnabled(False)
-        self.btn_cs_start.setText("Sebentar\u2026")
-        self.web_bridge.call("/booth/coupon/use", {
-            "code": c["code"], "item_id": c.get("item_id"),
-            "machine": str(CONFIG.get("booth_name", "") or ""),
-            "outlet": str(CONFIG.get("outlet", "") or "")},
-            lambda st, data, err: self._coupon_used(
-                job, *coupon_result_from(st, data, err, "/booth/coupon/use")))
-
-    def _coupon_used(self, job, status, data):
-        if job is not self._cs_job:
-            return
-        self._cs_job = None
-        if self.stack.currentIndex() != self.SCREEN_COUPON_START or not self._coupon:
-            return
-        code = job["code"]
-        if status == "ok":
-            self._cs_tick.stop()
-            if isinstance(data, dict) and data.get("marked") is False:
-                LOG.warning(f"[COUPON] {code}: starting, NOT marked used "
-                            f"(order_items.used_at column not added yet)")
-            else:
-                LOG.info(f"[COUPON] {code}: marked used, starting")
-            self._access_done()
-            return
-        self.btn_cs_start.setEnabled(True)
-        self.btn_cs_start.setText("MULAI FOTO")
-        if status in ("used", "not_found", "not_paid"):
-            self._cs_tick.stop()
-            LOG.info(f"[COUPON] {code}: cannot be used ({status})")
-            self._reset_to_home()
-            self._show_popup(self.stack.widget(self.SCREEN_HOME), "Kode tidak bisa dipakai",
-                             f"{data}\nSilakan panggil karyawan kami ya, Kak.")
-            return
-        LOG.warning(f"[COUPON] {code}: could not mark used: {data}")
-        if self._cs_left <= 0:
-            self._coupon_start_tick(first=True)       # time ran out while waiting
-            return
-        self._show_popup(self._coupon_start_screen, "Belum bisa mulai",
-                         f"{data}\nCoba tekan MULAI lagi, atau panggil karyawan kami ya, Kak.")
+                          and self._coupon and self._access_done())
 
     def _flush_sessions_now(self):
         if self.web_bridge is not None:
@@ -5674,6 +5577,14 @@ class MainWindow(QMainWindow):
         pc_x = (sw - pc_w) // 2
         pc_y = avail_top + (avail_h - pc_h) // 2
         self.preview_container.setGeometry(pc_x, pc_y, pc_w, pc_h)
+        rpanel = getattr(self, "ready_panel", None)
+        if rpanel is not None:
+            # Under the live view, over the (still empty) photo strip.
+            rw = min(sw - 80, 860)
+            ry = pc_y + pc_h + 14
+            rh = max(150, min(200, sh - ry - 16))
+            rpanel.setGeometry((sw - rw) // 2, ry, rw, rh)
+            rpanel.raise_()
         bar = getattr(self, "cap_sticker_bar", None)
         if bar is not None:
             n_btn = len(self._cap_sticker_btns)
@@ -5742,6 +5653,7 @@ class MainWindow(QMainWindow):
         self._last_uncropped_frame = raw_frame
         self._cam_frame_seen = True
         if (self.session_started and not self._cam_warming
+                and not getattr(self, "_ready_mode", False)
                 and not self.is_reviewing and not self.is_reviewing_final):
             now = time.perf_counter()
             min_dt = 1.0 / max(self.video_fps, 1)
@@ -5777,6 +5689,13 @@ class MainWindow(QMainWindow):
             h = self.preview_label.height()
         if w < 10 or h < 10:
             return
+        if _full_frame() and not is_cropped:
+            # The live view box follows the camera's own shape once it is known.
+            fa = frame.shape[1] / float(max(1, frame.shape[0]))
+            if abs(fa - getattr(self, "_fit_cam_aspect", 0.0)) > 0.01:
+                self._fit_cam_aspect = fa
+                self._fit_capture_layout()
+                w, h = self.preview_label.width(), self.preview_label.height()
         sid = getattr(self, "sticker_id", "")
         if sid and _stickers_on("live"):
             frame = self._stk_tracker.draw(frame, sid)      # what the guest sees, not saved
@@ -6227,7 +6146,121 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(self.SCREEN_CAPTURE)
         self._rec_blink_timer.start()
         QTimer.singleShot(0, self._fit_capture_layout)
-        self._start_camera_warmup()
+        self._enter_ready()
+
+    def _enter_ready(self):
+        """Live view with the sticker column and MULAI FOTO. Coupon: the code is used
+        only when MULAI is pressed; no press in payment.coupon_start_minutes -> home,
+        code unused. Paid session: shooting starts by itself after
+        capture.ready_seconds."""
+        self._ready_mode = True
+        self._ready_job = None
+        self._cam_warming = False
+        coupon = getattr(self, "_coupon", None)
+        try:
+            if coupon:
+                secs = float(_payment_cfg().get("coupon_start_minutes", 5) or 5) * 60
+            else:
+                secs = float((CONFIG.get("capture", {}) or {}).get("ready_seconds", 60) or 60)
+        except (TypeError, ValueError):
+            secs = 300 if coupon else 60
+        self._ready_left = max(10, int(secs))
+        self.ready_hint.setText("Pilih sticker di samping, lalu tekan MULAI FOTO kalau sudah siap"
+                                if _stickers_on("live") else "Tekan MULAI FOTO kalau sudah siap")
+        self.btn_ready_start.setEnabled(True)
+        self.btn_ready_start.setText("MULAI FOTO")
+        self.btn_ready_cancel.setVisible(bool(coupon))
+        self.ready_banner.hide()
+        self.countdown_label.hide()
+        self.ready_panel.show()
+        self.ready_panel.raise_()
+        self._ready_tick_fn(first=True)
+        self._ready_tick.start()
+
+    def _ready_tick_fn(self, first=False):
+        if not self._ready_mode or self.stack.currentIndex() != self.SCREEN_CAPTURE:
+            self._ready_tick.stop()
+            return
+        if not first:
+            self._ready_left -= 1
+        coupon = getattr(self, "_coupon", None)
+        if self._ready_left <= 0 and self._ready_job is None:
+            self._ready_tick.stop()
+            if coupon:
+                LOG.info(f"[COUPON] {coupon.get('code')}: MULAI not pressed in time, code stays unused")
+                self._reset_to_home()
+                self._show_popup(self.stack.widget(self.SCREEN_HOME), "Waktu habis",
+                                 "Kode kamu belum terpakai. Masukkan lagi kodenya kalau sudah siap ya, Kak.")
+            else:
+                LOG.info("[READY] start not pressed - starting by itself")
+                self._begin_shooting()
+            return
+        m, s_ = divmod(max(0, self._ready_left), 60)
+        self.ready_timer_lbl.setText(f"Tekan MULAI dalam {m:02d}:{s_:02d}" if coupon
+                                     else f"Mulai otomatis dalam {m:02d}:{s_:02d}")
+
+    def _ready_cancel(self):
+        LOG.info(f"[COUPON] {(getattr(self, '_coupon', None) or {}).get('code')}: cancelled, code stays unused")
+        self._reset_to_home()
+
+    def _ready_start(self):
+        if not self._ready_mode or self._ready_job is not None:
+            return
+        c = getattr(self, "_coupon", None)
+        if not c:
+            self._begin_shooting()
+            return
+        # Coupon: use the code up on the website first.
+        job = {"code": c["code"]}
+        self._ready_job = job
+        self.btn_ready_start.setEnabled(False)
+        self.btn_ready_start.setText("Sebentar\u2026")
+        self.web_bridge.call("/booth/coupon/use", {
+            "code": c["code"], "item_id": c.get("item_id"),
+            "machine": str(CONFIG.get("booth_name", "") or ""),
+            "outlet": str(CONFIG.get("outlet", "") or "")},
+            lambda st, data, err: self._coupon_used(
+                job, *coupon_result_from(st, data, err, "/booth/coupon/use")))
+
+    def _coupon_used(self, job, status, data):
+        if job is not self._ready_job:
+            return
+        self._ready_job = None
+        if not self._ready_mode or not getattr(self, "_coupon", None):
+            return
+        code = job["code"]
+        if status == "ok":
+            if isinstance(data, dict) and data.get("marked") is False:
+                LOG.warning(f"[COUPON] {code}: starting, NOT marked used "
+                            f"(order_items.used_at column not added yet)")
+            else:
+                LOG.info(f"[COUPON] {code}: marked used, starting")
+            self._begin_shooting()
+            return
+        self.btn_ready_start.setEnabled(True)
+        self.btn_ready_start.setText("MULAI FOTO")
+        if status in ("used", "not_found", "not_paid"):
+            LOG.info(f"[COUPON] {code}: cannot be used ({status})")
+            self._reset_to_home()
+            self._show_popup(self.stack.widget(self.SCREEN_HOME), "Kode tidak bisa dipakai",
+                             f"{data}\nSilakan panggil karyawan kami ya, Kak.")
+            return
+        LOG.warning(f"[COUPON] {code}: could not mark used: {data}")
+        if self._ready_left <= 0:
+            self._ready_tick_fn(first=True)           # time ran out while waiting
+            return
+        self._show_popup(self.capture_screen, "Belum bisa mulai",
+                         f"{data}\nCoba tekan MULAI lagi, atau panggil karyawan kami ya, Kak.")
+
+    def _begin_shooting(self):
+        self._ready_mode = False
+        self._ready_tick.stop()
+        self.ready_panel.hide()
+        if self._cam_frame_seen:                     # camera already live: straight to the countdown
+            self.ready_banner.setText("Siap-siap ya!")
+            self._start_capture_cycle()
+        else:
+            self._start_camera_warmup()
 
     def _start_camera_warmup(self):
         """Give the camera time to start before the first shot's countdown."""
@@ -7803,9 +7836,11 @@ class MainWindow(QMainWindow):
         self._customer = {}
         self._promo = None
         self._coupon = None
-        if hasattr(self, "_cs_tick"):
-            self._cs_tick.stop()
-            self._cs_job = None
+        if hasattr(self, "_ready_tick"):
+            self._ready_tick.stop()
+            self._ready_job = None
+            self._ready_mode = False
+            self.ready_panel.hide()
         self._session_id = None
         self.is_reviewing = False
         self.is_reviewing_final = False
@@ -8208,7 +8243,7 @@ class MainWindow(QMainWindow):
                          "Setting baru langsung dipakai mulai sesi berikutnya.")
 
     def _screen_step(self, index):
-        groups = (("payment", ("SCREEN_PAYMENT", "SCREEN_CODE", "SCREEN_COUPON", "SCREEN_COUPON_START")),
+        groups = (("payment", ("SCREEN_PAYMENT", "SCREEN_CODE", "SCREEN_COUPON")),
                   ("capture", ("SCREEN_CAPTURE",)),
                   ("edit", ("SCREEN_PICK", "SCREEN_FRAMES")),
                   ("print", ("SCREEN_PRINT", "SCREEN_DONE")))
