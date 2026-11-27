@@ -157,8 +157,7 @@ Setelah itu minta BCA kirim notifikasi tes dari sandbox / simulator mereka, lalu
 
 ## Sesuai dokumen BCA
 
-Dicek ke [developer.bca.co.id/id/Dokumentasi](https://developer.bca.co.id/id/Dokumentasi), bagian
-"OAuth2.0 (SNAP)", "Signature (SNAP)", "Headers (SNAP)" dan "QRIS MPM > SNAP QRIS Notification":
+Dicek ke dokumen teknis BCA **QRIS Notification v2.1** dan **OpenAPI OAuth & Signature v2.0**:
 
 - Signature token: `SHA256withRSA(client_ID + "|" + X-TIMESTAMP)`, base64. Gagal: `4017300 Unathorized. [Signature]`.
 - Signature notifikasi: `HMAC-SHA512(ClientSecret, METHOD:RelativeUrl:AccessToken:lowercase(hex(sha256(minify(body)))):Timestamp)`.
@@ -166,6 +165,10 @@ Dicek ke [developer.bca.co.id/id/Dokumentasi](https://developer.bca.co.id/id/Dok
 - Notifikasi: service code `52`, sukses `2005200`, `X-EXTERNAL-ID` dobel `4095200`, header `CHANNEL-ID` `95251`,
   `X-PARTNER-ID` = Kode Grup merchant. `approvalCode`, `issuerName`, `transactionDate` ada di `additionalInfo`.
 - **Notifikasi belum tersedia di sandbox BCA**: tes notifikasi hanya bisa di production / dengan bantuan tim BCA.
+- Signature dicek dari body **persis seperti yang dikirim BCA** (cuma spasi di luar string yang dibuang),
+  tidak di-encode ulang, sesuai "Important Notice" di dokumen OAuth & Signature v2.0.
+- BCA mengulang notifikasi kalau dapat HTTP 401, 500, 503 atau 504 (maks 4 kali). Kalau database
+  gagal, website membalas 500 supaya BCA mengirim ulang.
 
 ## Kunci yang dipakai (jangan tertukar)
 
@@ -179,8 +182,28 @@ Client ID / secret untuk arah BCA → website disepakati waktu onboarding dengan
 
 ## Mesin booth
 
-`NeoPhoto.py` (bagian `BCA_*`) sudah mengikuti dokumen yang sama: `qrOption: "C"` supaya BCA mengirim
-isi QR (bawaannya cuma gambar), `additionalInfo.terminalId` di inquiry, `validityPeriod` minimal 6 menit,
-`CHANNEL-ID` `95251`, production `https://api.klikbca.com` (`BCA_IS_PRODUCTION = True`).
-Pakai dengan `config.json`: `"payment": {"mode": "qris", "qris_provider": "bca"}`.
+`NeoPhoto.py` (bagian `BCA_*`) dicek ke dokumen teknis BCA: **SNAP QR MPM Generate QR v2.4**,
+**QR MPM Inquiry v2.4**, **QRIS Notification v2.1**, **OpenAPI OAuth & Signature v2.0**.
+
+| Aturan BCA | Di mesin |
+|---|---|
+| URL UAT `https://devapi.klikbca.com`, production `https://api.klikbca.com` | `BCA_IS_PRODUCTION = False` = UAT, `True` = production |
+| `partnerReferenceNo` alfanumerik, maks 64 | nomor order tanpa tanda `-`: `NEO-20261127083000-ab12` dikirim sebagai `NEO20261127083000ab12` |
+| `X-EXTERNAL-ID` angka 32 / 36 digit, unik per hari | 32 digit (waktu ms + urutan + acak) |
+| `validityPeriod` minimal +5 menit, maks +120 menit | hitung mundur layar bayar (min 5 menit) + 20 detik |
+| `qrOption: "C"` supaya respons berisi isi QR (`qrContent`) | dipakai |
+| Inquiry wajib `originalReferenceNo`, `serviceCode` `47`, `merchantId`, `additionalInfo.terminalId` | dikirim semua |
+| Inquiry `2005100` + `latestTransactionStatus`: `00` lunas, `03` belum, `04` refund, `06` gagal | dipakai; status hanya dipercaya kalau `2005100` |
+| Inquiry `403 4035100` = QR kedaluwarsa | dianggap kedaluwarsa (gagal) |
+| Inquiry `5005100` dll (error sistem, walau ada `06`) | diabaikan, cek lagi 2 detik kemudian |
+
+Setelah hitung mundur habis, layar bayar menyembunyikan QR dan masih **cek status 45 detik** lagi
+(sampai QR BCA benar-benar kedaluwarsa), jadi tamu yang bayar di detik terakhir tetap lanjut foto.
+
+Di tabel `bca_qris_notifications`, `partner_reference_no` berisi nomor order **tanpa `-`**
+(seperti yang dikirim ke BCA). Mencocokkan dengan order di website: hapus `-` dari nomor order dulu.
+
+Refund (QR MPM Refund v2.3, `/openapi/v1.0/qr/qr-mpm-refund`) **belum** dipakai mesin; refund lewat BCA.
+
+Pakai dengan `config.json` / Settings: Cara mulai sesi = Bayar QRIS, Penyedia QRIS = BCA.
 Mesin tetap cek status lewat inquiry ke BCA; tabel notifikasi jadi catatan cadangan di website.

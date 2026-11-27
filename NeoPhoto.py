@@ -17,6 +17,7 @@ import datetime
 import platform
 import math
 import random
+import re
 import zipfile
 import json
 import threading
@@ -692,9 +693,10 @@ class QrisClient:
 # booth PC before building the exe; empty = demo QR (like Midtrans without a key).
 #   BCA_PRIVATE_KEY_PEM: the RSA private key whose PUBLIC key was given to BCA
 #   (paste the whole "-----BEGIN ... PRIVATE KEY-----" block between the quotes).
-# Per developer.bca.co.id/id/Dokumentasi ("QRIS MPM": Generate QR, Inquiry).
+# Per BCA's Technical Documentation: SNAP QR MPM Generate QR v2.4, Inquiry v2.4,
+# QRIS Notification v2.1, OpenAPI OAuth & Signature v2.0.
 BCA_IS_PRODUCTION   = False
-BCA_BASE_URL        = ""        # empty = sandbox, or api.klikbca.com when BCA_IS_PRODUCTION
+BCA_BASE_URL        = ""        # empty = UAT (devapi), or api.klikbca.com when BCA_IS_PRODUCTION
 BCA_CLIENT_ID       = ""        # X-CLIENT-KEY
 BCA_CLIENT_SECRET   = ""
 BCA_PARTNER_ID      = ""        # X-PARTNER-ID: Kode Grup (merchant reguler) / partner name
@@ -702,7 +704,7 @@ BCA_CHANNEL_ID      = "95251"   # CHANNEL-ID (EDC WSID, per BCA's document)
 BCA_MERCHANT_ID     = ""        # Merchant ID from BCA (same for every booth)
 BCA_TERMINAL_ID     = ""        # Terminal ID; a booth with its own: Settings > Pembayaran
 BCA_PRIVATE_KEY_PEM = """"""
-BCA_SANDBOX_URL     = "https://sandbox.bca.co.id"
+BCA_SANDBOX_URL     = "https://devapi.klikbca.com"     # BCA's UAT environment
 BCA_PRODUCTION_URL  = "https://api.klikbca.com"
 BCA_PATH_TOKEN      = "/openapi/v1.0/access-token/b2b"
 BCA_PATH_GENERATE   = "/openapi/v1.0/qr/qr-mpm-generate"
@@ -720,6 +722,7 @@ class BcaQrisClient:
     PAID = QrisClient.PAID
     FAILED = QrisClient.FAILED
     STATUS = {"00": "settlement", "04": "refund", "05": "cancel", "06": "failure"}
+    GRACE_S = 45     # after the countdown: keep checking until the QR itself has expired
     # BCA latestTransactionStatus: 00 paid, 03 pending (unpaid), 04 refunded, 06 failed / QR expired
 
     def __init__(self):
@@ -736,6 +739,7 @@ class BcaQrisClient:
                  f"merchant={self.merchant_id or '-'} terminal={self.terminal_id or '-'}")
         self._token, self._token_until = None, 0.0
         self._refs = {}             # order_id -> BCA referenceNo
+        self._prefs = {}            # order_id -> partnerReferenceNo sent to BCA (letters / digits only)
         self._details = {}
         self._mock_paid = set()
         self._lock = threading.Lock()
@@ -777,7 +781,9 @@ class BcaQrisClient:
             raise QrisError(f"tidak bisa terhubung ke BCA ({e})") from e
         code = str(out.get("responseCode", ""))
         if not code.startswith("200"):
-            raise QrisError(f"BCA {code} {out.get('responseMessage', '')}".strip())
+            err = QrisError(f"BCA {code} {out.get('responseMessage', '')}".strip())
+            err.bca_code = code
+            raise err
         return out
 
     def _access_token(self):
@@ -806,7 +812,8 @@ class BcaQrisClient:
                        f"POST:{path}:{token}:{digest}:{ts}".encode(), hashlib.sha512).digest()
         with self._lock:
             self._ext = (self._ext + 1) % 1000
-            ext = f"{int(time.time() * 1000)}{self._ext:03d}"   # unique per day
+            # X-EXTERNAL-ID: numeric, 32 (or 36) digits, unique within the day.
+            ext = f"{int(time.time() * 1000):013d}{self._ext:03d}{random.randint(0, 10 ** 16 - 1):016d}"
         return self._post(path, body, {
             "Authorization": f"Bearer {token}", "X-TIMESTAMP": ts,
             "X-SIGNATURE": base64.b64encode(sig).decode(), "X-PARTNER-ID": BCA_PARTNER_ID,
@@ -818,10 +825,14 @@ class BcaQrisClient:
             LOG.info(f"[QRIS-BCA] MOCK charge {order_id} Rp{amount}")
             return {"qr_string": f"MOCK-QRIS-BCA|{order_id}|{amount}|BUKAN-PEMBAYARAN-ASLI",
                     "qr_url": None}
+        # validityPeriod: BCA allows created + 5 .. 120 min. The QR ends shortly after the
+        # booth's countdown; the booth keeps checking for GRACE_S after that.
         until = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7))) \
-            + datetime.timedelta(minutes=max(6, int(PAYMENT_TIMEOUT_MINUTES) + 1))   # BCA: min 5 min
+            + datetime.timedelta(seconds=max(300, int(PAYMENT_TIMEOUT_MINUTES) * 60) + 20)
+        pref = re.sub(r"[^A-Za-z0-9]", "", order_id)[:64]      # BCA: alphanumeric only
+        self._prefs[order_id] = pref
         out = self._call(BCA_PATH_GENERATE, {
-            "partnerReferenceNo": order_id,
+            "partnerReferenceNo": pref,
             "amount": {"value": f"{amount}.00", "currency": "IDR"},
             "merchantId": self.merchant_id,
             "terminalId": self.terminal_id,
@@ -831,19 +842,26 @@ class BcaQrisClient:
         if not out.get("qrContent"):
             raise QrisError("respon BCA tanpa QR")
         self._refs[order_id] = out.get("referenceNo") or ""
-        LOG.info(f"[QRIS-BCA] charge {order_id} Rp{amount} ref={self._refs[order_id]}")
+        LOG.info(f"[QRIS-BCA] charge {order_id} (partnerReferenceNo {pref}) Rp{amount} "
+                 f"ref={self._refs[order_id]}")
         return {"qr_string": out["qrContent"], "qr_url": None}
 
     def status(self, order_id):
         if self.mock:
             with self._lock:
                 return "settlement" if order_id in self._mock_paid else "pending"
-        body = {"originalPartnerReferenceNo": order_id, "serviceCode": BCA_SERVICE_CODE,
+        pref = self._prefs.get(order_id) or re.sub(r"[^A-Za-z0-9]", "", order_id)[:64]
+        body = {"originalPartnerReferenceNo": pref, "serviceCode": BCA_SERVICE_CODE,
                 "merchantId": self.merchant_id,
                 "additionalInfo": {"terminalId": self.terminal_id}}
         if self._refs.get(order_id):
             body["originalReferenceNo"] = self._refs[order_id]
-        out = self._call(BCA_PATH_QUERY, body)
+        try:
+            out = self._call(BCA_PATH_QUERY, body)
+        except QrisError as e:
+            if getattr(e, "bca_code", "") == "4035100":         # Transaction Expired
+                return "expire"
+            raise
         self._details[order_id] = out
         return self.STATUS.get(str(out.get("latestTransactionStatus", "")), "pending")
 
@@ -5482,11 +5500,19 @@ class MainWindow(QMainWindow):
         m, s_ = divmod(max(0, self._pay_left), 60)
         self.pay_timer_lbl.setText(f"Berlaku {m:02d}:{s_:02d}")
         if self._pay_left <= 0:
-            self._pay_tick.stop()
-            order = self._pay_order
-            threading.Thread(target=lambda: self.qris.cancel(order), daemon=True).start()
-            self._payment_failed(self._pay_token, "Waktu pembayaran habis")
-            return
+            # Time is up: stop showing the QR, but keep checking a little longer, so a
+            # payment made in the last seconds is not lost (BCA's QR stays valid ~20 s
+            # past the countdown; Midtrans' is cancelled right away).
+            if self._pay_left == 0:
+                order = self._pay_order
+                threading.Thread(target=lambda: self.qris.cancel(order), daemon=True).start()
+                self.pay_qr.clear()
+                self.pay_qr.setText("Mengecek pembayaran…")
+            self.pay_timer_lbl.setText("Waktu habis")
+            if self._pay_left <= -int(getattr(self.qris, "GRACE_S", 6)):
+                self._pay_tick.stop()
+                self._payment_failed(self._pay_token, "Waktu pembayaran habis")
+                return
         if self._pay_left % 2 == 0 and not self._pay_polling:
             self._pay_polling = True
             token, order = self._pay_token, self._pay_order
