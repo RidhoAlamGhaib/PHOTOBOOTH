@@ -7,6 +7,28 @@ BCA memanggil dua endpoint di `neophotoindonesia.my.id`:
 | `https://neophotoindonesia.my.id/openapi/v1.0/access-token/b2b` | **URL Production OAuth**: BCA minta access token (OAuth & Signature v2.0) |
 | `https://neophotoindonesia.my.id/openapi/v1.0/qr/qr-mpm-notify` | **URL Production services**: BCA kirim notifikasi pembayaran QRIS (SNAP QRIS Notification v2.1) |
 
+Dua URL di atas **sudah persis** sama dengan yang diminta BCA (domain + endpoint sesuai doktek
+SNAP QRIS Notification v2.1 dan OAuth & Signature v2.0). Route-nya ada di `routes/bca.php`.
+
+## Checklist go-live
+
+| # | Apa | Di mana | Status |
+|---|---|---|---|
+| 1 | URL Production OAuth + services didaftarkan ke BCA | form BCA | URL di tabel atas |
+| 2 | Controller + route + tabel di-deploy | langkah 1, 2, 4 di bawah | |
+| 3 | `.env` website: client id/secret + public key BCA (BCA → website) | langkah 3 | dari BCA |
+| 4 | Cloudflare / Imunify360 tidak menghadang `/openapi/*` | langkah 5 | |
+| 5 | Tes curl: balasan JSON `4007302` | langkah 6 | |
+| 6 | **Merchant ID** → `BCA_MERCHANT_ID` di `NeoPhoto.py` (mesin) | lokal, jangan di-commit | sudah dapat |
+| 7 | **Terminal ID** → `BCA_TERMINAL_ID` di `NeoPhoto.py`; kalau tiap mesin punya Terminal ID sendiri: Settings admin → Pembayaran → "Terminal ID BCA mesin ini" | lokal / Settings | sudah dapat |
+| 8 | Client ID / secret mesin → BCA (`BCA_CLIENT_ID`, `BCA_CLIENT_SECRET`), Kode Grup → `BCA_PARTNER_ID`, private key → `BCA_PRIVATE_KEY_PEM`; public key pasangannya dikirim ke BCA | lokal | dari BCA |
+| 9 | `BCA_IS_PRODUCTION = True`, build ulang exe | lokal | |
+| 10 | `config.json` / Settings: Penyedia QRIS = BCA | Settings admin | |
+
+Cek di log mesin waktu sesi bayar dibuka: `[QRIS-BCA] live production https://api.klikbca.com
+merchant=... terminal=...`. Kalau tertulis `MOCK`, salah satu dari client id, secret, private key,
+Merchant ID atau Terminal ID masih kosong (QR yang muncul QR demo, bukan pembayaran asli).
+
 Setiap pembayaran yang dilaporkan BCA masuk ke tabel `bca_qris_notifications`. Kolom
 `partner_reference_no` = nomor order dari mesin booth (`partnerReferenceNo` waktu QR dibuat).
 

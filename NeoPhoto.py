@@ -340,6 +340,9 @@ _FALLBACK_DEFAULTS = {
         "mode": "qris",
         "qris_provider": "midtrans",
         "coupon_start_minutes": 5,
+        # BCA QRIS: this machine's Terminal ID when each booth has its own
+        # (empty = BCA_TERMINAL_ID in NeoPhoto.py).
+        "bca_terminal_id": "",
     },
     # This photo machine's name / number and the outlet (location) it stands in;
     # saved on every order in the online database (orders.machine, orders.outlet).
@@ -494,6 +497,7 @@ SETTINGS_SPEC = [
     ("Pembayaran", [
         ("payment.mode", "Cara mulai sesi", "choice", [("qris", "Bayar QRIS"), ("coupon", "Kode kupon")]),
         ("payment.qris_provider", "Penyedia QRIS", "choice", [("midtrans", "Midtrans"), ("bca", "BCA")]),
+        ("payment.bca_terminal_id", "Terminal ID BCA mesin ini (kosong = bawaan)", "text", None),
         ("payment.coupon_start_minutes", "Waktu tekan MULAI (menit)", "int", None),
         ("pricing.price", "Harga paket (Rp)", "int", None),
         ("pricing.free_photos", "Foto gratis (0 = pose + bonus)", "int", None),
@@ -695,8 +699,8 @@ BCA_CLIENT_ID       = ""        # X-CLIENT-KEY
 BCA_CLIENT_SECRET   = ""
 BCA_PARTNER_ID      = ""        # X-PARTNER-ID: Kode Grup (merchant reguler) / partner name
 BCA_CHANNEL_ID      = "95251"   # CHANNEL-ID (EDC WSID, per BCA's document)
-BCA_MERCHANT_ID     = ""
-BCA_TERMINAL_ID     = ""
+BCA_MERCHANT_ID     = ""        # Merchant ID from BCA (same for every booth)
+BCA_TERMINAL_ID     = ""        # Terminal ID; a booth with its own: Settings > Pembayaran
 BCA_PRIVATE_KEY_PEM = """"""
 BCA_SANDBOX_URL     = "https://sandbox.bca.co.id"
 BCA_PRODUCTION_URL  = "https://api.klikbca.com"
@@ -722,8 +726,14 @@ class BcaQrisClient:
         self.production = bool(BCA_IS_PRODUCTION)
         self.base = (BCA_BASE_URL or (BCA_PRODUCTION_URL if self.production
                                       else BCA_SANDBOX_URL)).rstrip("/")
+        self.merchant_id = str(BCA_MERCHANT_ID).strip()
+        self.terminal_id = (str((CONFIG.get("payment", {}) or {}).get("bca_terminal_id") or "").strip()
+                            or str(BCA_TERMINAL_ID).strip())
         self.mock = not (BCA_CLIENT_ID and BCA_CLIENT_SECRET and BCA_PRIVATE_KEY_PEM.strip()
-                         and BCA_MERCHANT_ID)
+                         and self.merchant_id and self.terminal_id)
+        LOG.info(f"[QRIS-BCA] {'MOCK (keys / merchant / terminal empty)' if self.mock else 'live'} "
+                 f"{'production' if self.production else 'sandbox'} {self.base} "
+                 f"merchant={self.merchant_id or '-'} terminal={self.terminal_id or '-'}")
         self._token, self._token_until = None, 0.0
         self._refs = {}             # order_id -> BCA referenceNo
         self._details = {}
@@ -813,8 +823,8 @@ class BcaQrisClient:
         out = self._call(BCA_PATH_GENERATE, {
             "partnerReferenceNo": order_id,
             "amount": {"value": f"{amount}.00", "currency": "IDR"},
-            "merchantId": BCA_MERCHANT_ID,
-            "terminalId": BCA_TERMINAL_ID,
+            "merchantId": self.merchant_id,
+            "terminalId": self.terminal_id,
             "validityPeriod": until.strftime("%Y-%m-%dT%H:%M:%S+07:00"),
             "additionalInfo": {"qrOption": "C"},     # QR content (default is an image only)
         })
@@ -829,8 +839,8 @@ class BcaQrisClient:
             with self._lock:
                 return "settlement" if order_id in self._mock_paid else "pending"
         body = {"originalPartnerReferenceNo": order_id, "serviceCode": BCA_SERVICE_CODE,
-                "merchantId": BCA_MERCHANT_ID,
-                "additionalInfo": {"terminalId": BCA_TERMINAL_ID}}
+                "merchantId": self.merchant_id,
+                "additionalInfo": {"terminalId": self.terminal_id}}
         if self._refs.get(order_id):
             body["originalReferenceNo"] = self._refs[order_id]
         out = self._call(BCA_PATH_QUERY, body)
