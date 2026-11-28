@@ -305,6 +305,13 @@ _FALLBACK_DEFAULTS = {
         # Live view before the first shot: guests pick a sticker and press MULAI FOTO;
         # a paid session starts by itself after this many seconds.
         "ready_seconds": 60,
+        # "normal": review after every photo (retake / next).
+        # "continuous": every pose is shot back to back, no review in between;
+        # guests pick their favourites at the end (for rooms where the screen is
+        # outside, e.g. high angle). Shoot a few extra (extra_shots) to pick from.
+        "mode": "normal",
+        "continuous_countdown": 5,     # countdown of the 2nd, 3rd ... photo
+        "continuous_preview": 1.5,     # seconds the photo shows before the next pose
     },
     # Face stickers (stickers/ folder): picked on the live view, kept per photo;
     # on the frame screen guests add extra stickers anywhere on the print.
@@ -508,6 +515,9 @@ SETTINGS_SPEC = [
     ("Sesi foto", [
         ("countdown_seconds", "Hitung mundur (detik)", "int", None),
         ("camera_warmup_seconds", "Persiapan kamera (detik)", "int", None),
+        ("capture.mode", "Mode foto", "choice",
+         [("normal", "Normal: review tiap foto"), ("continuous", "Beruntun: pilih di akhir")]),
+        ("capture.continuous_countdown", "Hitung mundur pose berikutnya, mode beruntun (detik)", "int", None),
         ("extra_shots", "Foto bonus per sesi", "int", None),
         ("max_retakes_per_shot", "Maks. foto ulang per pose", "int", None),
         ("review_auto_confirm_seconds", "Lanjut otomatis setelah (detik)", "int", None),
@@ -2067,6 +2077,12 @@ def clamp_adjust(img_shape, target_w, target_h, adj):
         cw, ch = float(w), w / ar
     hw, hh = cw / zoom / 2.0 / w, ch / zoom / 2.0 / h
     return (zoom, min(max(cx, hw), 1.0 - hw), min(max(cy, hh), 1.0 - hh))
+
+
+def _continuous():
+    """capture.mode = continuous: all poses back to back, pick at the end."""
+    return str((CONFIG.get("capture", {}) or {}).get("mode", "normal")).strip().lower() \
+        in ("continuous", "beruntun", "burst")
 
 
 def _sticker_soft_file():
@@ -6434,6 +6450,11 @@ class MainWindow(QMainWindow):
         self._ready_left = max(10, int(secs))
         self.ready_hint.setText("Pilih sticker di samping, lalu tekan MULAI FOTO kalau sudah siap"
                                 if _stickers_on("live") else "Tekan MULAI FOTO kalau sudah siap")
+        if _continuous():
+            n = self.total_shots
+            self.ready_hint.setText(("Pilih sticker, lalu " if _stickers_on("live") else "")
+                                    + f"tekan MULAI FOTO dan masuk ke ruangan: {n} foto diambil "
+                                    f"beruntun, pilih yang terbaik setelahnya")
         self.btn_ready_start.setEnabled(True)
         self.btn_ready_start.setText("MULAI FOTO")
         self.btn_ready_cancel.setVisible(bool(coupon))
@@ -6614,6 +6635,15 @@ class MainWindow(QMainWindow):
         self.countdown_label.show()
         self.countdown_label.raise_()
         self.current_count = CONFIG["countdown_seconds"]
+        if _continuous() and self.current_step > 1:
+            # Back to back: shorter countdown after the first photo (the first one
+            # keeps the full countdown: time to walk into the room).
+            try:
+                cd = int((CONFIG.get("capture", {}) or {}).get("continuous_countdown", 5))
+            except (TypeError, ValueError):
+                cd = 5
+            self.current_count = max(1, cd)
+            self.ready_banner.setText(f"Foto {self.current_step} dari {self.total_shots} \u00b7 ganti gaya!")
         self._run_countdown()
 
     def _run_countdown(self):
@@ -6710,11 +6740,28 @@ class MainWindow(QMainWindow):
         self.__dict__.setdefault("_shot_sticker", {})[id(frame)] = (frame, sid)
         self.is_reviewing = True
         self._show_review_pixmap()
+        if _continuous():
+            # No review: show the photo a moment, then straight to the next pose.
+            try:
+                secs = float((CONFIG.get("capture", {}) or {}).get("continuous_preview", 1.5))
+            except (TypeError, ValueError):
+                secs = 1.5
+            self._cont_token = getattr(self, "_cont_token", 0) + 1
+            token = self._cont_token
+            LOG.info(f"[CAPTURE] continuous: photo {self.current_step}/{self.total_shots}")
+            QTimer.singleShot(int(max(0.3, secs) * 1000), lambda: self._continuous_next(token))
+            return
         remaining = self.max_retakes_per_shot - self.retakes_used
         self._style_retake_button(enabled=(remaining > 0), remaining=remaining)
         self.review_widget.show()
         self.review_widget.raise_()
         self._start_review_auto_confirm()
+
+    def _continuous_next(self, token):
+        if (token != getattr(self, "_cont_token", 0) or not self.is_reviewing
+                or self.stack.currentIndex() != self.SCREEN_CAPTURE):
+            return
+        self._next_photo()
 
     def _show_review_pixmap(self):
         rgb = cv2.cvtColor(self._with_sticker(self.current_frame_data), cv2.COLOR_BGR2RGB)
