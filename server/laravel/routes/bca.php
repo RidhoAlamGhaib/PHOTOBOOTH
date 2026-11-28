@@ -8,8 +8,8 @@ use App\Http\Controllers\BcaQrisController;
 Route::post('/openapi/v1.0/access-token/b2b', [BcaQrisController::class, 'token'])
     ->withoutMiddleware(['App\Http\Middleware\VerifyCsrfToken', 'Illuminate\Foundation\Http\Middleware\ValidateCsrfToken',
                          'Illuminate\Foundation\Http\Middleware\PreventRequestForgery'])
-    ->middleware('throttle:60,1');
+    ->middleware('throttle:60,1,bca-token');
 Route::post('/openapi/v1.0/qr/qr-mpm-notify', [BcaQrisController::class, 'notify'])
     ->withoutMiddleware(['App\Http\Middleware\VerifyCsrfToken', 'Illuminate\Foundation\Http\Middleware\ValidateCsrfToken',
                          'Illuminate\Foundation\Http\Middleware\PreventRequestForgery'])
-    ->middleware('throttle:300,1');
+    ->middleware('throttle:300,1,bca-notify');

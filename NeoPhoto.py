@@ -312,6 +312,14 @@ _FALLBACK_DEFAULTS = {
         "mode": "normal",
         "continuous_countdown": 5,     # countdown of the 2nd, 3rd ... photo
         "continuous_preview": 1.5,     # seconds the photo shows before the next pose
+        # Remote HP: the guest scans a QR on the ready screen and shoots from their
+        # phone (a page on the website, BOOTH_SITE_URL; no app). No waiting timer:
+        # each FOTO press = one countdown + photo, up to remote_max_photos, SELESAI
+        # ends early. remote_idle_minutes: safety for an abandoned session.
+        "remote": False,
+        "remote_max_photos": 20,
+        "remote_countdown": 5,
+        "remote_idle_minutes": 15,
     },
     # Face stickers (stickers/ folder): picked on the live view, kept per photo;
     # on the frame screen guests add extra stickers anywhere on the print.
@@ -518,6 +526,10 @@ SETTINGS_SPEC = [
         ("capture.mode", "Mode foto", "choice",
          [("normal", "Normal: review tiap foto"), ("continuous", "Beruntun: pilih di akhir")]),
         ("capture.continuous_countdown", "Hitung mundur pose berikutnya, mode beruntun (detik)", "int", None),
+        ("capture.remote", "Remote HP (scan QR, foto dari HP customer)", "choice", _YES_NO),
+        ("capture.remote_max_photos", "Remote HP: maks. foto per sesi", "int", None),
+        ("capture.remote_countdown", "Remote HP: hitung mundur setelah tekan FOTO (detik)", "int", None),
+        ("capture.remote_idle_minutes", "Remote HP: selesai sendiri kalau diam (menit)", "int", None),
         ("extra_shots", "Foto bonus per sesi", "int", None),
         ("max_retakes_per_shot", "Maks. foto ulang per pose", "int", None),
         ("review_auto_confirm_seconds", "Lanjut otomatis setelah (detik)", "int", None),
@@ -2077,6 +2089,19 @@ def clamp_adjust(img_shape, target_w, target_h, adj):
         cw, ch = float(w), w / ar
     hw, hh = cw / zoom / 2.0 / w, ch / zoom / 2.0 / h
     return (zoom, min(max(cx, hw), 1.0 - hw), min(max(cy, hh), 1.0 - hh))
+
+
+def _cap_int(key, default, lo=1, hi=999):
+    try:
+        v = int((CONFIG.get("capture", {}) or {}).get(key, default))
+    except (TypeError, ValueError):
+        v = default
+    return max(lo, min(hi, v))
+
+
+def _remote_wanted():
+    """capture.remote: guests shoot from their phone (needs the website bridge)."""
+    return bool((CONFIG.get("capture", {}) or {}).get("remote", False)) and bool(BOOTH_SITE_URL)
 
 
 def _continuous():
@@ -3893,9 +3918,20 @@ class MainWindow(QMainWindow):
         self.ready_panel.setObjectName("readyPanel")
         self.ready_panel.setStyleSheet(f"#readyPanel {{ background: {COLORS['card']}; "
                                        f"border: 1px solid {COLORS['border']}; border-radius: 6px; }}")
-        rp = QVBoxLayout(self.ready_panel)
-        rp.setContentsMargins(24, 14, 24, 14)
+        outer = QHBoxLayout(self.ready_panel)
+        outer.setContentsMargins(24, 14, 24, 14)
+        outer.setSpacing(20)
+        # Remote HP: QR to open the phone remote (hidden otherwise).
+        self.ready_qr = QLabel()
+        self.ready_qr.setFixedSize(156, 156)
+        self.ready_qr.setAlignment(Qt.AlignCenter)
+        self.ready_qr.setStyleSheet("background: white; border: none;")
+        self.ready_qr.hide()
+        outer.addWidget(self.ready_qr, 0, Qt.AlignVCenter)
+        rp = QVBoxLayout()
+        rp.setContentsMargins(0, 0, 0, 0)
         rp.setSpacing(10)
+        outer.addLayout(rp, 1)
         self.ready_hint = QLabel("Pilih sticker di samping, lalu tekan MULAI FOTO kalau sudah siap")
         self.ready_hint.setAlignment(Qt.AlignCenter)
         self.ready_hint.setWordWrap(True)
@@ -6380,10 +6416,14 @@ class MainWindow(QMainWindow):
     def total_shots(self):
         """Layout poses + bonus shots (capped by the slot widgets we have)."""
         n = max(1, int(self.shots_per_session))
+        if getattr(self, "_remote_planned", False):
+            return max(n, _cap_int("remote_max_photos", 20, 1, 60))
         return min(MAX_SLOTS, n + max(0, int(getattr(self, "extra_shots", 0) or 0)))
 
     def _start_session(self):
         self.extra_shots = max(0, int(CONFIG.get("extra_shots", 0) or 0))
+        self._remote_close()
+        self._remote_planned = _remote_wanted() and self.web_bridge is not None
         self.all_shots = []
         self._bonus_paid_n = 0
         self._bonus_warned = False
@@ -6455,15 +6495,25 @@ class MainWindow(QMainWindow):
             self.ready_hint.setText(("Pilih sticker, lalu " if _stickers_on("live") else "")
                                     + f"tekan MULAI FOTO dan masuk ke ruangan: {n} foto diambil "
                                     f"beruntun, pilih yang terbaik setelahnya")
+        if getattr(self, "_remote_planned", False):
+            # No hurry with the phone: the wait is only a safety for an abandoned session.
+            self._ready_left = max(self._ready_left, _cap_int("remote_idle_minutes", 15, 1, 240) * 60)
+            self.ready_hint.setText(f"Scan QR pakai kamera HP, masuk ke ruangan, lalu tekan FOTO di HP. "
+                                    f"Foto sampai {self.total_shots} kali, SELESAI kalau sudah cukup")
         self.btn_ready_start.setEnabled(True)
         self.btn_ready_start.setText("MULAI FOTO")
+        self.btn_ready_cancel.setText("Batal")
+        self.btn_ready_cancel.setEnabled(True)
         self.btn_ready_cancel.setVisible(bool(coupon))
         self.ready_banner.hide()
         self.countdown_label.hide()
+        self.ready_qr.hide()
         self.ready_panel.show()
         self.ready_panel.raise_()
         self._ready_tick_fn(first=True)
         self._ready_tick.start()
+        if getattr(self, "_remote_planned", False):
+            self._remote_open()
 
     def _ready_tick_fn(self, first=False):
         if not self._ready_mode or self.stack.currentIndex() != self.SCREEN_CAPTURE:
@@ -6480,18 +6530,31 @@ class MainWindow(QMainWindow):
                 self._show_popup(self.stack.widget(self.SCREEN_HOME), "Waktu habis",
                                  "Kode kamu belum terpakai. Masukkan lagi kodenya kalau sudah siap ya, Kak.")
             else:
+                if self._remote:
+                    LOG.info("[REMOTE] nobody pressed FOTO - shooting without the phone")
+                    self._remote_close()
+                    self._remote_planned = False
                 LOG.info("[READY] start not pressed - starting by itself")
                 self._begin_shooting()
+            return
+        if self._remote:
+            self.ready_timer_lbl.setText("")          # no countdown pressure with the phone
             return
         m, s_ = divmod(max(0, self._ready_left), 60)
         self.ready_timer_lbl.setText(f"Tekan MULAI dalam {m:02d}:{s_:02d}" if coupon
                                      else f"Mulai otomatis dalam {m:02d}:{s_:02d}")
 
     def _ready_cancel(self):
+        if self._remote and self._remote.get("waiting"):
+            self._remote_finish()                      # "SELESAI" between remote photos
+            return
         LOG.info(f"[COUPON] {(getattr(self, '_coupon', None) or {}).get('code')}: cancelled, code stays unused")
         self._reset_to_home()
 
     def _ready_start(self):
+        if self._remote and self._remote.get("waiting"):
+            self._remote_shoot()                       # "FOTO" between remote photos
+            return
         if not self._ready_mode or self._ready_job is not None:
             return
         c = getattr(self, "_coupon", None)
@@ -6635,7 +6698,10 @@ class MainWindow(QMainWindow):
         self.countdown_label.show()
         self.countdown_label.raise_()
         self.current_count = CONFIG["countdown_seconds"]
-        if _continuous() and self.current_step > 1:
+        if self._remote:
+            self.current_count = _cap_int("remote_countdown", 5, 1, 30)
+            self.ready_banner.setText(f"Foto {self.current_step} \u00b7 siap-siap!")
+        elif _continuous() and self.current_step > 1:
             # Back to back: shorter countdown after the first photo (the first one
             # keeps the full countdown: time to walk into the room).
             try:
@@ -6740,7 +6806,9 @@ class MainWindow(QMainWindow):
         self.__dict__.setdefault("_shot_sticker", {})[id(frame)] = (frame, sid)
         self.is_reviewing = True
         self._show_review_pixmap()
-        if _continuous():
+        if self._remote:
+            self._remote_queue_photo(frame, len(self.captured_frames) + 1)
+        if _continuous() or self._remote:
             # No review: show the photo a moment, then straight to the next pose.
             try:
                 secs = float((CONFIG.get("capture", {}) or {}).get("continuous_preview", 1.5))
@@ -6748,7 +6816,8 @@ class MainWindow(QMainWindow):
                 secs = 1.5
             self._cont_token = getattr(self, "_cont_token", 0) + 1
             token = self._cont_token
-            LOG.info(f"[CAPTURE] continuous: photo {self.current_step}/{self.total_shots}")
+            LOG.info(f"[CAPTURE] {'remote' if self._remote else 'continuous'}: "
+                     f"photo {self.current_step}/{self.total_shots}")
             QTimer.singleShot(int(max(0.3, secs) * 1000), lambda: self._continuous_next(token))
             return
         remaining = self.max_retakes_per_shot - self.retakes_used
@@ -6756,6 +6825,221 @@ class MainWindow(QMainWindow):
         self.review_widget.show()
         self.review_widget.raise_()
         self._start_review_auto_confirm()
+
+    # ---- Remote HP ----------------------------------------------------------
+    # self._remote: {"key", "url", "ack", "queue": [(n, jpeg b64)], "busy", "waiting",
+    #                "done", "last" (monotonic time of the last phone action), "auto"}
+
+    @property
+    def _remote(self):
+        return self.__dict__.get("_remote_state")
+
+    def _remote_open(self):
+        import secrets
+        self._remote_close()
+        key = secrets.token_urlsafe(24)
+        r = {"key": key, "url": _site_url(BOOTH_SITE_URL) + "/r/" + key, "ack": 0, "queue": [],
+             "busy": False, "waiting": False, "done": False, "auto": False,
+             "last": time.monotonic(), "phone": False, "lost": False}
+        self.__dict__["_remote_state"] = r
+        self.ready_qr.setText("Menyiapkan\nQR…")
+        self.ready_qr.show()
+
+        def opened(status, data, err):
+            if r is not self._remote:
+                return
+            if status == 200 and isinstance(data, dict) and data.get("ok"):
+                LOG.info(f"[REMOTE] open {key[:6]}… {r['url'][:60]}")
+                self._remote_show_qr(r["url"])
+                if not hasattr(self, "_remote_timer"):
+                    self._remote_timer = QTimer(self)
+                    self._remote_timer.setInterval(1000)
+                    self._remote_timer.timeout.connect(self._remote_sync)
+                self._remote_timer.start()
+                return
+            LOG.warning(f"[REMOTE] cannot open on the website ({status} {err or data}); "
+                        f"shooting without the phone")
+            self.__dict__["_remote_state"] = None
+            self._remote_planned = False
+            self.ready_qr.hide()
+            if self._ready_mode:
+                self._enter_ready()
+        self.web_bridge.call("/booth/remote/open", {
+            "key": key, "machine": str(CONFIG.get("booth_name", "") or ""),
+            "max": self.total_shots, "min": self.shots_per_session}, opened)
+
+    def _remote_show_qr(self, url):
+        try:
+            import qrcode
+            qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+            side = self.ready_qr.width()
+            img = img.resize((side, side), Image.NEAREST)
+            data = img.tobytes("raw", "RGB")
+            self.ready_qr.setPixmap(QPixmap.fromImage(
+                QImage(data, img.width, img.height, img.width * 3, QImage.Format_RGB888).copy()))
+        except Exception as e:
+            LOG.warning(f"[REMOTE] QR failed: {e}")
+            self.ready_qr.setText("QR gagal")
+
+    def _remote_close(self, r=None):
+        """End the phone remote: the key stops working, the photos on the website go."""
+        cur = self.__dict__.get("_remote_state")
+        r = r or cur
+        if not r or r.get("closed"):
+            return
+        r["closed"] = True
+        if r is cur:
+            self.__dict__["_remote_state"] = None
+            if hasattr(self, "_remote_timer"):
+                self._remote_timer.stop()
+            if hasattr(self, "ready_qr"):
+                self.ready_qr.hide()
+        if self.web_bridge is not None and not getattr(self, "_shut_down_bridge", False):
+            LOG.info(f"[REMOTE] close {r['key'][:6]}…")
+            self.web_bridge.call("/booth/remote/close", {"key": r["key"]}, lambda *a: None)
+
+    def _remote_state_dict(self):
+        r = self._remote
+        taken = len(self.captured_frames)
+        mx, mn = self.total_shots, self.shots_per_session
+        st = {"taken": taken, "max": mx, "min": mn, "count": 0, "can_shoot": False, "can_finish": False}
+        if r.get("done"):
+            st.update(phase="done", message="Selesai! Silakan keluar ruangan untuk memilih foto.")
+        elif self._ready_mode:
+            busy = self._ready_job is not None
+            st.update(phase="ready", can_shoot=not busy,
+                      message="Sebentar…" if busy else "Siap! Masuk ke ruangan, atur posisi, lalu tekan FOTO.")
+        elif self.is_reviewing or getattr(self, "_canon_waiting", False) or self._cam_warming:
+            st.update(phase="saving", message="Menyimpan foto…" if not self._cam_warming
+                      else "Menyiapkan kamera…")
+        elif self.countdown_label.isVisible():
+            st.update(phase="countdown", count=max(0, int(self.current_count) + 1),
+                      message=f"Foto {self.current_step}: siap-siap, lihat ke kamera!")
+        elif r.get("waiting"):
+            more = mn - taken
+            st.update(phase="waiting", can_shoot=taken < mx, can_finish=taken >= mn,
+                      message=(f"Foto {taken} tersimpan. Tekan FOTO untuk foto lagi"
+                               + (f" (minimal {more} lagi)." if more > 0 else ", atau SELESAI kalau sudah cukup.")))
+        else:
+            st.update(phase="busy", message="Sebentar…")
+        return st
+
+    def _remote_sync(self):
+        r = self._remote
+        if not r or r.get("busy") or self.web_bridge is None:
+            return
+        # Safety for an abandoned session: no phone action for remote_idle_minutes.
+        idle = _cap_int("remote_idle_minutes", 15, 1, 240) * 60
+        if r.get("waiting") and not r.get("auto") and time.monotonic() - r["last"] > idle:
+            if len(self.captured_frames) >= self.shots_per_session:
+                LOG.info("[REMOTE] idle - finishing")
+                self._remote_finish()
+            else:
+                LOG.info("[REMOTE] idle - taking the missing photos by itself")
+                r["auto"] = True
+                self._remote_shoot()
+        payload = {"key": r["key"], "ack": r["ack"], "state": self._remote_state_dict()}
+        if r["queue"]:
+            n, b64 = r["queue"][0]
+            payload["photo"] = {"n": n, "jpeg": b64}
+        r["busy"] = True
+        self.web_bridge.call("/booth/remote/sync", payload,
+                             lambda st, d, e: self._remote_synced(r, payload, st, d, e))
+
+    def _remote_synced(self, r, payload, status, data, err):
+        r["busy"] = False
+        if r is not self._remote:
+            return
+        if status == 200 and isinstance(data, dict):
+            if r["lost"]:
+                LOG.info("[REMOTE] website back")
+                r["lost"] = False
+            if "photo" in payload and r["queue"] and r["queue"][0][0] == payload["photo"]["n"]:
+                r["queue"].pop(0)
+            if data.get("phone") and not r["phone"]:
+                r["phone"] = True
+                LOG.info("[REMOTE] phone connected")
+            for c in data.get("cmds") or []:
+                try:
+                    seq = int(c.get("seq") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if seq <= r["ack"]:
+                    continue
+                r["ack"] = seq
+                cmd = str(c.get("cmd") or "")
+                LOG.info(f"[REMOTE] phone: {cmd}")
+                r["last"] = time.monotonic()
+                if cmd == "shoot":
+                    self._remote_shoot()
+                elif cmd == "finish":
+                    self._remote_finish()
+        elif status == 404:
+            if not r["lost"]:
+                LOG.warning("[REMOTE] session gone on the website; the touch screen still works")
+            r["lost"] = True
+        elif not r["lost"]:
+            LOG.warning(f"[REMOTE] sync failed ({status} {err}); retrying")
+            r["lost"] = True
+
+    def _remote_queue_photo(self, frame, n):
+        """A phone-size copy of photo n (beauty + sticker, as printed) for the remote page."""
+        try:
+            img = self._with_sticker(frame)
+            h, w = img.shape[:2]
+            s_ = min(1.0, 1080.0 / max(h, w))
+            if s_ < 1.0:
+                img = cv2.resize(img, (int(w * s_), int(h * s_)), interpolation=cv2.INTER_AREA)
+            ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 78])
+            if ok:
+                import base64
+                self._remote["queue"].append((n, base64.b64encode(buf.tobytes()).decode()))
+        except Exception as e:
+            LOG.warning(f"[REMOTE] photo {n} not sent to the phone: {e}")
+
+    def _remote_shoot(self):
+        r = self._remote
+        if not r or r.get("done"):
+            return
+        if self._ready_mode:
+            if self._ready_job is None:
+                self._ready_start()            # coupon: uses the code first, like MULAI FOTO
+            return
+        if r.get("waiting") and len(self.captured_frames) < self.total_shots:
+            r["waiting"] = False
+            self.ready_panel.hide()
+            self._start_capture_cycle()
+
+    def _remote_finish(self):
+        r = self._remote
+        if not r or not r.get("waiting") or len(self.captured_frames) < self.shots_per_session:
+            return
+        LOG.info(f"[REMOTE] finished with {len(self.captured_frames)} photo(s)")
+        self._finish_shooting()
+
+    def _remote_wait(self):
+        """Between remote photos: live view, waiting for FOTO / SELESAI (phone or screen)."""
+        r = self._remote
+        r["waiting"] = True
+        taken, mn = len(self.captured_frames), self.shots_per_session
+        self.ready_banner.hide()
+        self.countdown_label.hide()
+        self.ready_hint.setText(f"Foto {taken} tersimpan. Tekan FOTO di HP untuk foto lagi"
+                                + (f" (minimal {mn} foto)" if taken < mn else ", atau SELESAI kalau sudah cukup"))
+        self.btn_ready_start.setText("FOTO")
+        self.btn_ready_start.setEnabled(True)
+        self.btn_ready_cancel.setText("SELESAI")
+        self.btn_ready_cancel.setVisible(True)
+        self.btn_ready_cancel.setEnabled(taken >= mn)
+        self.ready_timer_lbl.setText("")
+        self.ready_qr.setVisible(not r.get("phone"))
+        self.ready_panel.show()
+        self.ready_panel.raise_()
+        if r.get("auto"):
+            QTimer.singleShot(3000, lambda: r is self._remote and self._remote_shoot())
 
     def _continuous_next(self, token):
         if (token != getattr(self, "_cont_token", 0) or not self.is_reviewing
@@ -6827,23 +7111,42 @@ class MainWindow(QMainWindow):
             self._pending_moving_clip = None
             self.current_frame_data = None
             self._update_captured_previews()
+        if self._remote and not self._remote.get("done"):
+            if len(self.captured_frames) >= self.total_shots:
+                self._finish_shooting()
+            else:
+                self.current_step += 1
+                self.retakes_used = 0
+                self._update_progress_dots()
+                self._remote_wait()
+            return
         if self.current_step < self.total_shots:
             self.current_step += 1
             self.retakes_used = 0
             self._update_progress_dots()
             self._start_capture_cycle()
         else:
-            self._update_progress_dots()
-            self.is_reviewing_final = True
-            self.camera.crop = False
-            self._rec_blink_timer.stop()
-            self._collect_all_shots()
-            if len(self.all_shots) > self.shots_per_session:
-                self._goto_pick_screen()
-            else:
-                self.pick_pool = list(range(len(self.all_shots)))
-                self._apply_pool_order()
-                self._goto_frame_picker()
+            self._finish_shooting()
+
+    def _finish_shooting(self):
+        """Last photo taken: on to the pick screen (or straight to the frames)."""
+        if self._remote:
+            self._remote["done"] = True
+            self._remote["waiting"] = False
+            self.ready_panel.hide()
+            r = self._remote
+            QTimer.singleShot(8000, lambda: self._remote_close(r))   # phone sees "done" first
+        self._update_progress_dots()
+        self.is_reviewing_final = True
+        self.camera.crop = False
+        self._rec_blink_timer.stop()
+        self._collect_all_shots()
+        if len(self.all_shots) > self.shots_per_session:
+            self._goto_pick_screen()
+        else:
+            self.pick_pool = list(range(len(self.all_shots)))
+            self._apply_pool_order()
+            self._goto_frame_picker()
 
     def _collect_all_shots(self):
         """all_shots = every photo of the session in shooting order, retakes
@@ -7009,11 +7312,12 @@ class MainWindow(QMainWindow):
 
     def _pick_max(self):
         """Most photos the user may keep. With a bonus price every shot can be
-        kept (the ones above the free limit are paid); otherwise poses + bonus."""
+        kept (the ones above the free limit are paid); otherwise poses + bonus.
+        Never more than the frame screen can show (MAX_SLOTS)."""
         N = self.shots_per_session
         if self._charges_on() and _price(self.current_layout, "bonus_price") > 0:
-            return len(self.all_shots)
-        return min(len(self.all_shots), N + max(0, int(getattr(self, "extra_shots", 0) or 0)))
+            return min(MAX_SLOTS, len(self.all_shots))
+        return min(MAX_SLOTS, len(self.all_shots), N + max(0, int(getattr(self, "extra_shots", 0) or 0)))
 
     def _pick_paid_count(self):
         """(paid photos, amount) for the current pick, minus already-paid ones."""
@@ -8328,6 +8632,7 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_upload_session, daemon=True).start()
 
     def _reset_to_home(self):
+        self._remote_close()
         self._customer = {}
         self._promo = None
         self._coupon = None
@@ -8379,6 +8684,7 @@ class MainWindow(QMainWindow):
             return
         self._shut_down = True
         LOG.info("[EXIT] shutting down")
+        self._remote_close()
         for t in self.findChildren(QTimer):
             t.stop()
         if getattr(self, "dnp", None) is not None:
