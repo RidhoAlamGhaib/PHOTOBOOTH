@@ -248,6 +248,20 @@ class LiveTracker:
                 used.add(best)
                 t["face"] = self._blend(t["face"], found[best], self.smooth)
                 t["miss"] = 0
+        # A track that just lost its face while a new face appeared elsewhere is the
+        # same person who moved fast: jump there instead of leaving a ghost sticker
+        # at the old spot for a few frames.
+        for t in self._tracks:
+            if t["miss"] == 0:
+                continue
+            free = [i for i in range(len(found)) if i not in used]
+            if not free:
+                break
+            cx, cy = self._center(t["face"])
+            j = min(free, key=lambda i: math.hypot(self._center(found[i])[0] - cx,
+                                                   self._center(found[i])[1] - cy))
+            used.add(j)
+            t["face"], t["miss"] = found[j], 0
         self._tracks = [t for t in self._tracks if t["miss"] <= self.keep]
         self._tracks += [{"face": f, "miss": 0} for i, f in enumerate(found) if i not in used]
         return [t["face"] for t in self._tracks]

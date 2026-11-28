@@ -5720,7 +5720,9 @@ class MainWindow(QMainWindow):
         cd_h = int(min(pc_w, pc_h) * 0.45)
         cd_w = max(cd_h, int(pc_w * 0.55))
         cd_font = max(60, int(cd_h * 0.78))
-        self.countdown_label.setStyleSheet(f"color: white; background: transparent; font-weight: 700; "
+        # Dark see-through card behind the number: readable on a white backdrop too.
+        self.countdown_label.setStyleSheet(f"color: white; background: rgba(26, 25, 24, 115); "
+                                           f"border-radius: 28px; font-weight: 700; "
                                            f"font-family: '{FONT_MONO}'; font-size: {cd_font}px;")
         self.countdown_label.setFixedSize(cd_w, cd_h)
         self.countdown_label.setGeometry((pc_w - cd_w) // 2, (pc_h - cd_h) // 2, cd_w, cd_h)
@@ -5758,7 +5760,15 @@ class MainWindow(QMainWindow):
             slot.placeholder_text.setGeometry(0, 0, sw_s, sh_s)
             if slot.image_label is not None:
                 slot.image_label.setGeometry(2, 2, sw_s - 4, sh_s - 4)
-        pp_w = 270 + 34 * self.total_shots
+        rpanel = getattr(self, "ready_panel", None)
+        if rpanel is not None:
+            # The ready panel sits over the photo strip: cover all of it (many slots
+            # with the phone remote are wider than the panel).
+            g = rpanel.geometry()
+            need = min(sw - 40, total_w + 40)
+            if need > g.width():
+                rpanel.setGeometry((sw - need) // 2, g.y(), need, g.height())
+        pp_w = 270 + 34 * min(self.total_shots, len(self.progress_dots))
         pp_h = progress_pill_h
         self.progress_pill.setGeometry((sw - pp_w) // 2, sh - pp_h - bottom_pad, pp_w, pp_h)
         rv_w = 540
@@ -6742,8 +6752,7 @@ class MainWindow(QMainWindow):
         self._live_color_ref = ref.copy() if ref is not None else None
         try:
             self.countdown_label.setText("")
-            self.countdown_label.show()
-            self.countdown_label.raise_()
+            self.countdown_label.hide()          # (it has a dark card behind the number)
         except Exception:
             pass
         self.camera.request_capture()
